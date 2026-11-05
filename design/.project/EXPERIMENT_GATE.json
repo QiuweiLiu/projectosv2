@@ -1,0 +1,8 @@
+{
+  "status": "not_registered",
+  "rationale": "仅登记 Core 契约；本项目无正式实验授权，尚未安装或验证运行时 gate。产品中的科研门禁属于可选 Research 能力。",
+  "smoke_passed": false,
+  "ledger_registered": false,
+  "commit": "",
+  "experiments": []
+}

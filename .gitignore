@@ -1,0 +1,26 @@
+# local state and generated artifacts
+.DS_Store
+.scratch/
+bin/
+desktop/build/
+work/
+evidence/
+design/outputs/
+*.db
+*.db-wal
+*.db-shm
+serve.json
+serve.log
+control-token
+
+# credentials — never commit
+.env
+.secrets/
+github_token
+*.pem
+*.key
+
+# tool caches
+__pycache__/
+.venv/
+node_modules/

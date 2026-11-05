@@ -1,0 +1,41 @@
+{
+  "name": "two-attempts",
+  "pack": "research",
+  "tasks": [
+    {
+      "id": "A",
+      "objective": "produce 42 without side effects",
+      "prompt": "Create a file named a.txt in the repository root containing exactly the two characters 42 and nothing else. If the attempt number ${ATTEMPT} is 1, also create notes.md containing a one-line explanation. If it is greater than 1, create no other file. Do not explain.",
+      "artifact": "a.txt",
+      "validator": {
+        "type": "exact",
+        "expect": "42"
+      },
+      "maxAttempts": 2
+    },
+    {
+      "id": "B",
+      "objective": "produce 7",
+      "prompt": "Create a file named b.txt in the repository root containing exactly the single character 7 and nothing else. Do not explain.",
+      "artifact": "b.txt",
+      "validator": {
+        "type": "exact",
+        "expect": "7"
+      }
+    },
+    {
+      "id": "C",
+      "objective": "sum A and B",
+      "prompt": "The value A is ${A} and the value B is ${B}. Compute their integer sum and write only the decimal result into a file named c.txt in the repository root.",
+      "artifact": "c.txt",
+      "deps": [
+        "A",
+        "B"
+      ],
+      "validator": {
+        "type": "contains",
+        "expect": "49"
+      }
+    }
+  ]
+}

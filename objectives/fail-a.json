@@ -1,0 +1,40 @@
+{
+  "name": "fail-a",
+  "pack": "simple",
+  "tasks": [
+    {
+      "id": "A",
+      "objective": "produce 42",
+      "prompt": "Create a file named a.txt in the repository root containing exactly the two characters 40 and nothing else. Do not explain.",
+      "artifact": "a.txt",
+      "validator": {
+        "type": "exact",
+        "expect": "42"
+      }
+    },
+    {
+      "id": "B",
+      "objective": "produce 7",
+      "prompt": "Create a file named b.txt in the repository root containing exactly the single character 7 and nothing else. Do not explain.",
+      "artifact": "b.txt",
+      "validator": {
+        "type": "exact",
+        "expect": "7"
+      }
+    },
+    {
+      "id": "C",
+      "objective": "sum A and B",
+      "prompt": "The value A is ${A} and the value B is ${B}. Compute their integer sum and write only the decimal result into a file named c.txt in the repository root.",
+      "artifact": "c.txt",
+      "deps": [
+        "A",
+        "B"
+      ],
+      "validator": {
+        "type": "contains",
+        "expect": "49"
+      }
+    }
+  ]
+}

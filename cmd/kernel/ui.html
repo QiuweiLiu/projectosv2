@@ -1,0 +1,886 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ProjectOS</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --ink:#1f2328;--muted:#6b7280;--faint:#9aa1ab;
+  --bg:#f6f6f4;--panel:#ffffff;--line:#e6e4df;--line-strong:#d7d4cd;
+  --ok:#2f6f4e;--ok-bg:#eaf3ee;--bad:#a8352c;--bad-bg:#fbeeec;
+  --warn:#8a6100;--warn-bg:#fbf3e2;--run:#2b5f9e;--run-bg:#eaf0f8;
+  --radius:12px;--shadow:0 1px 2px rgba(20,20,19,.04),0 6px 20px rgba(20,20,19,.05);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.65 -apple-system,BlinkMacSystemFont,"SF Pro SC","PingFang SC",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased}
+button{font:inherit}
+.app{display:grid;grid-template-columns:18rem 1fr;height:100vh}
+
+/* sidebar */
+.side{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.brand{padding:1rem 1.1rem .8rem;display:flex;align-items:center;justify-content:space-between}
+.brand b{font-size:.95rem;letter-spacing:.01em;font-weight:600}
+.brand .dot{width:7px;height:7px;border-radius:99px;background:var(--ok);display:inline-block;margin-right:.45rem;vertical-align:middle}
+.objs{overflow:auto;flex:1;padding:.35rem .6rem}
+.obj{padding:.65rem .7rem;border-radius:10px;cursor:pointer;margin-bottom:.2rem;border:1px solid transparent}
+.obj:hover{background:#f7f7f5}
+.obj.on{background:#f1f4f1;border-color:#dfe6e0}
+.obj .g{font-size:.84rem;line-height:1.45;color:#2b2f33;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.obj .r{display:flex;gap:.45rem;align-items:center;margin-top:.35rem;font-size:.72rem;color:var(--muted)}
+.sidefoot{border-top:1px solid var(--line);padding:.7rem .8rem;font-size:.72rem;color:var(--faint)}
+.sidefoot input{width:100%;margin-top:.4rem;padding:.35rem .5rem;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:.74rem;background:#fbfbfa}
+.newgoal{margin:.55rem;padding:.6rem;border:1px dashed var(--line-strong);border-radius:10px;text-align:center;cursor:pointer;color:#4b5563;font-size:.82rem;background:#fff}
+.newgoal:hover{border-color:#b9b6ae;color:var(--ink)}
+
+/* main */
+.main{overflow:auto;padding:1.6rem 2rem 4rem}
+.wrap{max-width:52rem;margin:0 auto}
+.head{display:flex;gap:1rem;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+h1{font-size:1.18rem;line-height:1.5;margin:0 0 .3rem;font-weight:600;letter-spacing:-.01em}
+.goal{color:var(--muted);font-size:.86rem;max-width:44rem}
+.chips{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.6rem}
+.actions{display:flex;gap:.45rem;flex-wrap:wrap;justify-content:flex-end}
+.btn{padding:.42rem .85rem;border-radius:9px;border:1px solid var(--line-strong);background:#fff;cursor:pointer;color:var(--ink);font-size:.84rem;transition:background .12s}
+.btn:hover{background:#f7f7f5}
+.btn.primary{background:#1f2328;border-color:#1f2328;color:#fff}
+.btn.primary:hover{background:#000}
+.btn.primary:disabled{background:#c9ccd2;border-color:#c9ccd2;opacity:1}
+.btn.danger{color:var(--bad);border-color:#e8c9c5}
+.btn.danger:hover{background:#fdf4f3}
+.btn.small{padding:.28rem .6rem;font-size:.78rem}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible{outline:2px solid #2b5f9e;outline-offset:2px}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:1rem 1.15rem;margin-top:1rem}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:.55rem}
+.card h2{font-size:.78rem;font-weight:600;letter-spacing:.06em;color:var(--muted);margin:0;text-transform:uppercase}
+
+.pill{display:inline-flex;align-items:center;padding:.1rem .5rem;border-radius:99px;font-size:.72rem;background:#f1f1ef;color:#5b6169;white-space:nowrap}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.run{background:var(--run-bg);color:var(--run)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.plain{background:#f4f3f0;color:#6b7280}
+
+.report-text{margin:0;white-space:pre-wrap;font-size:.9rem;line-height:1.8;color:#2b2f33}
+.report-meta{font-size:.72rem;color:var(--faint);margin-top:.6rem;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
+
+.counts{display:flex;gap:1.4rem;flex-wrap:wrap;font-size:.8rem;color:var(--muted)}
+.counts b{display:block;font-size:1.25rem;color:var(--ink);font-weight:600;line-height:1.2}
+.bar{height:5px;border-radius:99px;background:#eceae6;overflow:hidden;margin-top:.8rem}
+.bar span{display:block;height:100%;background:var(--ok);border-radius:99px;transition:width .35s}
+
+/* graph */
+.graphwrap{overflow:auto;margin-top:.2rem}
+.graph{position:relative;display:flex;gap:3.4rem;padding:2.4rem .2rem 1.1rem;min-height:5rem;align-items:flex-start}
+.col{display:flex;flex-direction:column;gap:.85rem;min-width:9.8rem;position:relative;z-index:1}
+.node{background:#fff;border:1px solid var(--line);border-left:3px solid #cfd2d7;border-radius:10px;padding:.55rem .65rem;cursor:pointer;min-width:9.8rem;transition:box-shadow .12s,border-color .12s}
+.node:hover{box-shadow:var(--shadow)}
+.node.on{border-color:#9db4a6;box-shadow:0 0 0 3px #eef3ef}
+.node .id{display:flex;align-items:center;justify-content:space-between;gap:.4rem;font-weight:600;font-size:.84rem}
+.node .art{font-size:.74rem;color:var(--muted);margin-top:.2rem;word-break:break-all}
+.node[data-status="accepted"]{border-left-color:var(--ok)}
+.node[data-status="running"]{border-left-color:var(--run);box-shadow:0 0 0 3px var(--run-bg)}
+.node[data-status="blocked"],.node[data-status="rejected"]{border-left-color:var(--bad)}
+.node[data-status="pending"]{border-left-color:#d8a94a}
+.node[data-status="superseded"]{border-left-color:#c6c9ce;opacity:.6}
+.graph svg{position:absolute;inset:0;pointer-events:none;z-index:0}
+.graph path{fill:none;stroke:#cfd3d9;stroke-width:1.4}
+.graph path.done{stroke:#a9cbb8}
+
+/* detail */
+.kv{display:grid;grid-template-columns:5.5rem 1fr;gap:.3rem .8rem;font-size:.84rem}
+.kv div:nth-child(odd){color:var(--muted)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.76rem;word-break:break-all;color:#4b5563}
+details{margin-top:.7rem}
+summary{cursor:pointer;color:var(--muted);font-size:.78rem;list-style:none}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"▸ ";color:var(--faint)}
+details[open] summary::before{content:"▾ "}
+.finding{padding:.5rem 0;border-top:1px solid #f0efec;font-size:.83rem}
+.finding:first-of-type{border-top:0}
+.finding .code{font-family:ui-monospace,Menlo,monospace;font-size:.72rem;color:var(--faint);margin-top:.15rem}
+.diffbox{margin-top:.7rem;background:#0f172a;color:#e5e7eb;border-radius:9px;padding:.7rem .85rem;
+  font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;max-height:18rem;overflow:auto}
+.diffbox .add{color:#86efac}
+.diffbox .del{color:#fca5a5}
+.diffbox .ctx{color:#cbd5e1}
+.explain{background:#f7f8f6;border:1px solid #e6e9e4;border-radius:9px;padding:.7rem .85rem;font-size:.86rem;line-height:1.75;white-space:pre-wrap;margin-bottom:.6rem;color:#2b2f33}
+.af{border:1px solid var(--line);border-radius:9px;padding:.6rem .75rem;margin-bottom:.5rem;background:#fdfdfc}
+.af:last-child{margin-bottom:0}
+.af-head{display:flex;justify-content:space-between;gap:.6rem;align-items:baseline}
+.af-head b{font-size:.85rem;font-weight:600;word-break:break-all}
+.af-preview{margin:.45rem 0 0;padding:.55rem .65rem;background:#fff;border:1px solid #eceae6;border-radius:7px;
+  font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;max-height:9rem;overflow:auto;color:#3b4046}
+.af-media{display:block;max-width:100%;max-height:320px;margin-top:.55rem;border-radius:7px;background:#f4f3f0}
+.af-link{font-size:.76rem;color:var(--muted);text-decoration:none;border-bottom:1px dashed var(--line-strong)}
+.af-link:hover{color:var(--ink)}
+.model-row{display:grid;grid-template-columns:5rem 1fr;gap:.6rem;align-items:center;margin:.35rem 0}
+.model-row select{width:100%;padding:.35rem .45rem;border:1px solid var(--line-strong);border-radius:8px;
+  font:inherit;font-size:.8rem;background:#fff;color:var(--ink)}
+.sev{font-weight:600;margin-right:.4rem}
+.sev.P0,.sev.P1{color:var(--bad)}.sev.P2{color:var(--warn)}.sev.P3{color:var(--faint)}
+
+/* timeline */
+.tl{max-height:18rem;overflow:auto;font-size:.8rem}
+.tl .ev{display:flex;gap:.7rem;padding:.32rem 0;border-bottom:1px solid #f4f3f0}
+.tl .ev:last-child{border-bottom:0}
+.tl .when{color:var(--faint);font-size:.72rem;white-space:nowrap;padding-top:.12rem;min-width:3.2rem}
+.tl .what{color:#2b2f33}
+.tl .what b{font-weight:600}
+
+/* form */
+.form{display:flex;flex-direction:column;gap:.55rem}
+.form textarea{padding:.65rem .75rem;border:1px solid var(--line-strong);border-radius:10px;font:inherit;min-height:6rem;resize:vertical;background:#fdfdfc}
+.form textarea:focus{outline:none;border-color:#9db4a6;box-shadow:0 0 0 3px #eef3ef}
+.hint{font-size:.76rem;color:var(--faint)}
+.row{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
+.spacer{flex:1}
+.hidden{display:none!important}
+.modal{position:fixed;inset:0;background:rgba(20,24,30,.38);display:grid;place-items:center;z-index:50;padding:1rem}
+.modal-card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 50px rgba(20,24,30,.18);
+  width:min(42rem,100%);max-height:86vh;overflow:auto;padding:1.1rem 1.2rem}
+.modal-card h2{font-size:1rem;margin:0}
+.approval-reason{background:#fffaf0;border:1px solid #f0dfb8;border-radius:8px;padding:.55rem .7rem;
+  font-size:.82rem;line-height:1.6;margin:.45rem 0;color:#6b4b12}
+.approval-task{border-top:1px solid #f0efec;padding:.5rem 0;font-size:.82rem}
+.approval-task:first-child{border-top:0}
+.approval-task code{font-family:ui-monospace,Menlo,monospace;font-size:.75rem;color:#8a5a00;word-break:break-all}
+.approval-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;margin:.8rem 0}
+.approval-grid label{font-size:.75rem;color:var(--muted);display:flex;flex-direction:column;gap:.25rem}
+.approval-grid input{border:1px solid var(--line);border-radius:7px;padding:.35rem .45rem;font:inherit}
+.approval-check{display:flex;gap:.45rem;align-items:flex-start;font-size:.82rem;line-height:1.5;margin:.5rem 0 .9rem}
+.modal-actions{display:flex;justify-content:flex-end;gap:.5rem}
+.empty{color:var(--muted);font-size:.86rem;padding:1.2rem 0}
+.skeleton{height:1rem;background:linear-gradient(90deg,#f1f0ed,#f8f7f5,#f1f0ed);border-radius:6px;margin:.4rem 0;animation:pulse 1.4s infinite}
+@keyframes pulse{0%{opacity:.7}50%{opacity:1}100%{opacity:.7}}
+
+@media (max-width:920px){
+  .app{grid-template-columns:1fr;height:auto}
+  .side{border-right:0;border-bottom:1px solid var(--line);max-height:38vh}
+  .main{padding:1.2rem 1rem 3rem}
+  .actions{justify-content:flex-start}
+}
+</style></head><body>
+<div class="app">
+  <aside class="side">
+    <div class="brand"><b><span class="dot"></span>ProjectOS</b><span class="pill plain" id="mode">…</span></div>
+    <div class="objs" id="objs"><div class="empty" style="padding:0 .6rem">加载中…</div></div>
+    <div class="newgoal hidden" id="newBtn">＋ 新目标</div>
+    <div class="sidefoot">
+      <span id="refreshInfo">—</span>
+      <form onsubmit="return false"><input id="token" type="password" placeholder="控制令牌（写操作需要）" autocomplete="off"></form>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="wrap">
+      <div id="empty" class="empty">这个目录还没有目标。</div>
+
+      <section id="view" class="hidden">
+        <div class="head">
+          <div style="min-width:18rem;flex:1">
+            <h1 id="title">—</h1>
+            <div class="goal" id="goalText"></div>
+            <div class="chips">
+              <span class="pill" id="objStatus">…</span>
+              <span class="pill plain" id="planPill"></span>
+              <span class="pill plain" id="deliveryPill"></span>
+              <span class="pill warn hidden" id="cancelPill">正在取消</span>
+            </div>
+          </div>
+          <div style="text-align:right">
+            <div class="actions" id="actions">
+              <button class="btn" id="btnPlan" disabled>生成计划</button>
+              <button class="btn" id="btnConfirm" disabled>确认计划</button>
+              <button class="btn primary" id="btnRun" disabled>开始执行</button>
+              <button class="btn" id="btnContinue" style="display:none">继续改进</button>
+              <button class="btn danger" id="btnCancel" disabled>取消</button>
+            </div>
+            <div class="hint" id="jobLine" style="margin-top:.4rem"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>汇报</h2>
+            <div class="row">
+              <button class="btn small hidden" id="btnModelReport">重新生成汇报</button>
+            </div>
+          </div>
+          <p class="report-text" id="reportText">…</p>
+          <div class="report-meta" id="reportMeta"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>模型</h2>
+            <button class="btn small hidden" id="btnModelsRefresh">刷新模型列表</button>
+          </div>
+          <div id="modelGrid"></div>
+          <div class="hint" id="modelsHint"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>进度</h2></div>
+          <div class="counts" id="counts"></div>
+          <div class="bar"><span id="bar" style="width:0%"></span></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>任务</h2></div>
+          <div class="graphwrap"><div class="graph" id="graph"><svg></svg></div></div>
+          <div class="empty hidden" id="graphEmpty">还没有确认的计划。</div>
+        </div>
+
+        <div class="card" id="taskCard">
+          <div class="card-head"><h2>任务详情</h2></div>
+          <div class="empty" id="taskEmpty">点一个任务，查看它做了什么、依据是什么。</div>
+          <div id="taskBody" class="hidden"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>最近发生</h2></div>
+          <div class="tl" id="timeline"><span class="empty">—</span></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>成果</h2></div>
+          <div id="deliverables"><div class="hint">还没有交付文件。</div></div>
+        </div>
+      </section>
+
+      <section id="continuePanel" class="card hidden">
+        <div class="card-head"><h2>继续改进</h2></div>
+        <div class="form">
+          <textarea id="continueInput" placeholder="在已交付的成果上继续做什么。例如：给汇总脚本加上按月份分组的小计，并更新汇总文档。"></textarea>
+          <div class="row">
+            <button class="btn primary" id="btnContinueCreate">生成后续计划</button>
+            <span class="hint">已通过的成果会原样保留，只新增任务；生成后仍由你决定何时执行。</span>
+            <span class="spacer"></span>
+            <button class="btn" id="btnContinueCancel">收起</button>
+          </div>
+          <div class="hint" id="continueStatus"></div>
+        </div>
+      </section>
+
+      <section id="newPanel" class="card hidden">
+        <div class="card-head"><h2>新目标</h2></div>
+        <div class="form">
+          <textarea id="goalInput" placeholder="用一句话说清你要什么。例如：做一个待办清单网页，支持新增、完成、删除，数据存在浏览器里，并配一个能跑通的测试。"></textarea>
+          <div class="row">
+            <button class="btn primary" id="btnCreate">创建并生成计划</button>
+            <span class="hint">生成计划后还需要你确认，才会开始执行。</span>
+            <span class="spacer"></span>
+            <button class="btn" id="btnNewCancel">收起</button>
+          </div>
+          <div class="hint" id="newStatus"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <div class="modal hidden" id="approval">
+    <div class="modal-card">
+      <div class="card-head"><h2>执行前确认</h2></div>
+      <div class="hint">worker 可写；planner / reviewer / acceptance / reporter 只读。命令校验以当前用户身份执行，不是沙箱。</div>
+      <div id="approvalReasons"></div>
+      <div id="approvalTasks"></div>
+      <div class="approval-grid">
+        <label>最多运行次数<input id="maxRuns" type="number" min="1" value="8"></label>
+        <label>最多审查次数<input id="maxReviews" type="number" min="1" value="8"></label>
+        <label>token 预算<input id="maxTokens" type="number" min="1" value="600000"></label>
+      </div>
+      <label class="approval-check"><input id="approveCheck" type="checkbox"> 我已确认上述高风险任务与命令，允许现在执行。</label>
+      <div class="modal-actions">
+        <button class="btn" id="approvalCancel">取消</button>
+        <button class="btn primary" id="btnApproveRun">批准并执行</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; };
+const clip = (s, n) => { s = (s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n) + '…' : s; };
+
+const TASK_LABEL = {accepted:'已通过', running:'执行中', pending:'待执行', blocked:'被卡住', superseded:'已替换', rejected:'未通过'};
+const OBJ_LABEL = {completed:'已完成', active:'进行中', failed:'未完成', cancelled:'已取消', draft:'草稿', planned:'待确认', paused:'已暂停', planning:'规划中'};
+const TASK_CLASS = {accepted:'ok', running:'run', blocked:'bad', rejected:'bad', pending:'warn', superseded:'plain'};
+const OBJ_CLASS = {completed:'ok', active:'run', failed:'bad', cancelled:'plain', planned:'warn', draft:'plain'};
+const EVENT_LABEL = {
+  started:'开始执行', accepted:'通过验收', rejected:'未通过', blocked:'被卡住',
+  review_blocked:'审查未通过', acceptance_blocked:'验收未通过', objective_cancelled:'目标已取消',
+  review_budget:'审查次数用尽', run_timeout:'执行超时', run_unknown:'执行结果未知',
+  cancel_failed:'取消未完成', start_failed:'启动失败', collect_failed:'读取结果失败',
+  observe_retry:'等待执行器响应', quarantine_persist_failed:'隔离状态保存失败',
+  review_unrecorded:'审查结果未保存', acceptance_not_recorded:'验收结果未保存'
+};
+
+const ROLES = [
+  ['planner', '规划'], ['worker', '执行'], ['reviewer', '审查'],
+  ['acceptance', '验收'], ['reporter', '汇报'],
+];
+
+const state = { control:false, objectives:[], id:null, detail:null, task:null, events:[], pending:false, report:null, reportAsked:{} };
+let detailGen = 0, taskGen = 0;
+
+function token(){ return $('token').value.trim() || localStorage.getItem('kernelToken') || ''; }
+$('token').value = localStorage.getItem('kernelToken') || '';
+$('token').addEventListener('change', () => localStorage.setItem('kernelToken', $('token').value.trim()));
+
+async function api(path, options){
+  const opts = Object.assign({headers:{}}, options || {});
+  if (opts.method && opts.method !== 'GET') {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.headers['X-Kernel-Token'] = token();
+  }
+  const res = await fetch(path, opts);
+  const text = await res.text();
+  let body = null; try { body = text ? JSON.parse(text) : null; } catch (e) { body = text; }
+  if (!res.ok) {
+    const msg = (body && body.message) || (typeof body === 'string' ? body.trim() : '') || res.statusText;
+    throw new Error(msg.replace(/\s+/g,' ').slice(0,200) + '（' + res.status + '）');
+  }
+  return body;
+}
+
+/* ---------- objectives ---------- */
+async function loadObjectives(){
+  let list;
+  try { list = await api('/api/objectives'); }
+  catch (e) { $('objs').innerHTML = '<div class="empty" style="padding:0 .6rem">' + esc(clip(e.message,120)) + '</div>'; return; }
+  state.objectives = list || [];
+  const box = $('objs'); box.textContent = '';
+  if (!state.objectives.length) box.innerHTML = '<div class="empty" style="padding:0 .6rem">还没有目标</div>';
+  state.objectives.forEach(o => {
+    const el = document.createElement('div');
+    el.className = 'obj' + (o.id === state.id ? ' on' : '');
+    el.innerHTML = '<div class="g">' + esc(o.title || o.goal) + '</div>' +
+      '<div class="r"><span class="pill ' + (OBJ_CLASS[o.status] || 'plain') + '">' + esc(OBJ_LABEL[o.status] || o.status) + '</span>' +
+      '<span>' + o.tasks.accepted + '/' + o.tasks.total + ' 已通过</span></div>';
+    el.onclick = () => selectObjective(o.id);
+    box.appendChild(el);
+  });
+  $('empty').classList.toggle('hidden', state.objectives.length > 0);
+  $('view').classList.toggle('hidden', !state.id);
+  if (!state.id && state.objectives.length) selectObjective(state.objectives[0].id);
+  $('refreshInfo').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN', {hour12:false});
+}
+
+function selectObjective(id){
+  if (state.id === id && state.detail) return;
+  state.id = id; state.task = null; state.detail = null; state.events = []; state.report = null;
+  history.replaceState(null, '', '#goal=' + encodeURIComponent(id));
+  loadObjectives(); loadDetail(); loadReport(); loadEvents(); loadModels();
+}
+
+/* ---------- detail ---------- */
+async function loadDetail(){
+  if (!state.id) return;
+  const gen = ++detailGen;
+  let d;
+  try { d = await api('/api/objectives/' + encodeURIComponent(state.id)); } catch (e) { return; }
+  if (gen !== detailGen) return;
+  state.detail = d;
+
+  $('empty').classList.add('hidden');
+  $('view').classList.remove('hidden');
+  $('title').textContent = d.objective.title || d.objective.goal;
+  const same = !d.objective.title || d.objective.title === d.objective.goal;
+  $('goalText').textContent = same ? '' : d.objective.goal;
+
+  $('objStatus').textContent = OBJ_LABEL[d.objective.status] || d.objective.status;
+  $('objStatus').className = 'pill ' + (OBJ_CLASS[d.objective.status] || 'plain');
+  const pv = d.planVersion || d.objective.planVersion;
+  $('planPill').textContent = pv ? ('计划 v' + pv + (d.planStatus === 'draft' ? ' · 待确认' : '')) : '还没有计划';
+  $('deliveryPill').textContent = d.delivery ? '已生成交付' : '尚未交付';
+  $('deliveryPill').className = 'pill ' + (d.delivery ? 'ok' : 'plain');
+  $('cancelPill').classList.toggle('hidden', !d.cancelRequested);
+
+  renderCounts(d.counts);
+  renderGraph(d.tasks || []);
+  updateActions(d);
+  if (state.task) loadTask(state.task);
+}
+
+function renderCounts(c){
+  const cells = [['已通过', c.accepted], ['执行中', c.running], ['待执行', c.pending], ['被卡住', c.blocked], ['已替换', c.superseded]];
+  $('counts').innerHTML = cells.map(([k, v]) => '<span><b>' + v + '</b>' + k + '</span>').join('');
+  const total = c.total || 0;
+  $('bar').style.width = total ? Math.round(c.accepted / total * 100) + '%' : '0%';
+}
+
+function updateActions(d){
+  const s = d.objective.status;
+  const canWrite = state.control && !state.pending;
+  const unplanned = !d.plan;
+  const plan = $('btnPlan'), confirm = $('btnConfirm'), run = $('btnRun'), cancel = $('btnCancel');
+  plan.disabled = !(canWrite && unplanned && (s === 'draft' || s === 'planned'));
+  confirm.disabled = !(canWrite && s === 'planned');
+  run.disabled = !(canWrite && s === 'active' && (d.counts.pending > 0 || d.counts.running > 0));
+  cancel.disabled = !(canWrite && ['draft','planned','active','paused'].includes(s));
+  const show = (el, on) => { el.style.display = on ? '' : 'none'; };
+  show(plan, s === 'draft' || (s === 'planned' && unplanned));
+  show(confirm, s === 'planned');
+  show(run, s === 'active' && (d.counts.pending > 0 || d.counts.running > 0));
+  show(cancel, ['draft','planned','active','paused'].includes(s));
+  show($('btnContinue'), canWrite && (s === 'completed' || s === 'failed'));
+  const terminal = s === 'completed' || s === 'failed' || s === 'cancelled';
+  $('actions').style.display = terminal && !(canWrite && (s === 'completed' || s === 'failed')) ? 'none' : '';
+  $('btnModelReport').classList.toggle('hidden', !state.control);
+}
+
+/* ---------- models ---------- */
+let modelData = { settings: {}, models: [] };
+
+async function loadModels(){
+  try { modelData = await api('/api/models'); } catch (e) { return; }
+  renderModels();
+}
+
+function renderModels(){
+  const grid = $('modelGrid');
+  const settings = modelData.settings || {};
+  const models = modelData.models || [];
+  const byProvider = {};
+  models.forEach(id => {
+    const provider = id.split('/')[0];
+    (byProvider[provider] = byProvider[provider] || []).push(id);
+  });
+
+  grid.innerHTML = ROLES.map(([role, label]) => {
+    const current = settings[role] || '';
+    let options = '<option value="">跟随默认</option>';
+    Object.keys(byProvider).sort().forEach(provider => {
+      options += '<optgroup label="' + esc(provider) + '">' +
+        byProvider[provider].map(id => '<option value="' + esc(id) + '"' +
+          (id === current ? ' selected' : '') + '>' + esc(id) + '</option>').join('') +
+        '</optgroup>';
+    });
+    // A saved model may be absent from the cached list; keep it selectable.
+    if (current && !models.includes(current)) {
+      options += '<option value="' + esc(current) + '" selected>' + esc(current) + '（未在缓存列表）</option>';
+    }
+    return '<div class="model-row"><span>' + esc(label) + '</span>' +
+      '<select data-role="' + role + '"' + (state.control ? '' : ' disabled') + '>' + options + '</select></div>';
+  }).join('');
+
+  grid.querySelectorAll('select').forEach(sel => {
+    sel.onchange = async () => {
+      const role = sel.dataset.role;
+      const model = sel.value;
+      try {
+        await api('/api/models', {method:'POST', body: JSON.stringify({role, model})});
+        $('modelsHint').textContent = '已保存：' + role + ' → ' + (model || '跟随默认');
+        await loadModels();
+      } catch (e) {
+        $('modelsHint').textContent = '保存失败：' + e.message;
+      }
+    };
+  });
+
+  const cacheAt = modelData.at ? new Date(modelData.at).toLocaleString('zh-CN', {hour12:false}) : '';
+  $('modelsHint').textContent = models.length
+    ? ('可选模型 ' + models.length + ' 个' + (cacheAt ? ' · ' + cacheAt : ''))
+    : '还没有模型列表，点右上角刷新。';
+  $('btnModelsRefresh').classList.toggle('hidden', !state.control);
+}
+
+$('btnModelsRefresh').onclick = async () => {
+  $('modelsHint').textContent = '正在从 OpenCode 拉取模型列表…';
+  try {
+    await api('/api/models', {method:'POST', body: JSON.stringify({refresh:true})});
+    await loadModels();
+  } catch (e) { $('modelsHint').textContent = '刷新失败：' + e.message; }
+};
+
+/* ---------- report ---------- */
+async function loadReport(){
+  if (!state.id) return;
+  let r;
+  try { r = await api('/api/report?objective=' + encodeURIComponent(state.id)); } catch (e) { return; }
+  state.report = r;
+
+  renderDeliverables(r.deliverables || []);
+
+  if (r.modelText) {
+    $('reportText').textContent = r.modelText;
+    $('reportMeta').textContent = '模型汇报 · ' + new Date(r.modelAt).toLocaleString('zh-CN', {hour12:false});
+    $('btnModelReport').textContent = '重新生成汇报';
+    return;
+  }
+
+  // No model report yet: show the factual summary in the meantime, and ask the
+  // model once automatically once the objective is finished.
+  $('reportText').textContent = r.text || '还没有汇报。';
+  $('reportMeta').textContent = '系统摘要 · 模型版尚未生成';
+  $('btnModelReport').textContent = '生成汇报';
+  const s = state.detail ? state.detail.objective.status : '';
+  const terminal = ['completed','failed','cancelled'].includes(s);
+  if (state.control && terminal && !state.reportAsked[state.id]) {
+    state.reportAsked[state.id] = true;
+    requestReport(true);
+  }
+}
+
+function fileURL(path){
+  return '/files/' + encodeURIComponent(state.id) + '/' + path.split('/').map(encodeURIComponent).join('/');
+}
+
+function renderDeliverables(list){
+  const box = $('deliverables');
+  if (!list.length) { box.innerHTML = '<div class="hint">还没有交付文件。</div>'; return; }
+  box.innerHTML = list.map(f => {
+    const size = f.bytes >= 1024 ? (f.bytes / 1024).toFixed(1) + ' KB' : f.bytes + ' B';
+    const url = fileURL(f.path);
+    let body = '';
+    switch (f.kind) {
+      case 'image':
+        body = '<a href="' + url + '" target="_blank" rel="noopener"><img class="af-media" loading="lazy" src="' + url + '" alt="' + esc(f.path) + '"></a>';
+        break;
+      case 'video':
+        body = '<video class="af-media" src="' + url + '" controls preload="metadata"></video>';
+        break;
+      case 'audio':
+        body = '<audio src="' + url + '" controls style="margin-top:.55rem;width:100%"></audio>';
+        break;
+      case 'pdf':
+        body = '<a class="btn small" style="margin-top:.55rem;display:inline-block" href="' + url + '" target="_blank" rel="noopener">打开 PDF</a>';
+        break;
+      case 'text':
+        body = (f.preview ? '<pre class="af-preview">' + esc(f.preview.length > 400 ? f.preview.slice(0, 400) + '…' : f.preview) + '</pre>' : '');
+        break;
+      default:
+        body = '<div class="hint" style="margin-top:.4rem">二进制文件，无法预览。</div>';
+    }
+    return '<div class="af"><div class="af-head"><b>' + esc(f.path) + '</b>' +
+      '<span class="hint">' + esc(size) + ' · <a class="af-link" href="' + url + '" target="_blank" rel="noopener">打开</a></span></div>' +
+      body + '</div>';
+  }).join('');
+}
+
+async function requestReport(auto){
+  try {
+    await api('/api/objectives/' + encodeURIComponent(state.id) + '/report', {method:'POST', body:'{}'});
+    $('jobLine').textContent = auto ? '目标已完成，正在生成汇报…' : '正在生成汇报…';
+  } catch (e) { if (!auto) alert(e.message); }
+}
+
+/* ---------- graph ---------- */
+function renderGraph(tasks){
+  const graph = $('graph'), svg = graph.querySelector('svg');
+  graph.querySelectorAll('.col').forEach(c => c.remove());
+  $('graphEmpty').classList.toggle('hidden', tasks.length > 0);
+  if (!tasks.length) { svg.innerHTML = ''; return; }
+
+  const byId = {}; tasks.forEach(t => byId[t.id] = t);
+  const depth = {};
+  const calc = (id, seen) => {
+    if (depth[id] != null) return depth[id];
+    if (seen.has(id)) return 0;
+    seen.add(id);
+    const deps = (byId[id].deps || []).filter(x => byId[x]);
+    depth[id] = deps.length ? 1 + Math.max.apply(null, deps.map(x => calc(x, seen))) : 0;
+    return depth[id];
+  };
+  tasks.forEach(t => calc(t.id, new Set()));
+
+  const maxDepth = Math.max.apply(null, Object.values(depth));
+  for (let d = 0; d <= maxDepth; d++) {
+    const col = document.createElement('div'); col.className = 'col';
+    tasks.filter(t => depth[t.id] === d).forEach(t => {
+      const n = document.createElement('div');
+      n.className = 'node' + (state.task === t.id ? ' on' : '');
+      n.dataset.task = t.id; n.dataset.status = t.status; n.dataset.depth = d;
+      n.innerHTML = '<div class="id"><span>' + esc(t.id) + '</span>' +
+        '<span class="pill ' + (TASK_CLASS[t.status] || 'plain') + '">' + esc(TASK_LABEL[t.status] || t.status) + '</span></div>' +
+        '<div class="art">' + esc(t.artifactPath || '—') + '</div>';
+      n.onclick = () => { state.task = t.id; renderGraph(state.detail.tasks); loadTask(t.id); };
+      col.appendChild(n);
+    });
+    graph.appendChild(col);
+  }
+  requestAnimationFrame(() => drawEdges(tasks));
+}
+
+function drawEdges(tasks){
+  const graph = $('graph'), svg = graph.querySelector('svg');
+  const box = graph.getBoundingClientRect();
+  svg.setAttribute('width', box.width); svg.setAttribute('height', box.height);
+  svg.innerHTML = '';
+  let lane = 0;
+  tasks.forEach(t => (t.deps || []).forEach(dep => {
+    const a = graph.querySelector('[data-task="' + CSS.escape(dep) + '"]');
+    const b = graph.querySelector('[data-task="' + CSS.escape(t.id) + '"]');
+    if (!a || !b) return;
+    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    const x1 = ra.right - box.left, y1 = ra.top + ra.height / 2 - box.top;
+    const x2 = rb.left - box.left, y2 = rb.top + rb.height / 2 - box.top;
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    if (Number(b.dataset.depth) - Number(a.dataset.depth) > 1) {
+      const laneY = 12 + lane * 9; lane++;
+      const bend = 26;
+      p.setAttribute('d', 'M' + x1 + ' ' + y1 +
+        ' C' + (x1+bend) + ' ' + y1 + ',' + (x1+bend) + ' ' + laneY + ',' + (x1+bend*2) + ' ' + laneY +
+        ' L' + (x2-bend*2) + ' ' + laneY +
+        ' C' + (x2-bend) + ' ' + laneY + ',' + (x2-bend) + ' ' + y2 + ',' + x2 + ' ' + y2);
+    } else {
+      const mid = (x1 + x2) / 2;
+      p.setAttribute('d', 'M' + x1 + ' ' + y1 + ' C' + mid + ' ' + y1 + ',' + mid + ' ' + y2 + ',' + x2 + ' ' + y2);
+    }
+    if (a.dataset.status === 'accepted' && b.dataset.status === 'accepted') p.classList.add('done');
+    svg.appendChild(p);
+  }));
+}
+window.addEventListener('resize', () => { if (state.detail) drawEdges(state.detail.tasks || []); });
+
+/* ---------- task detail ---------- */
+function paintDiff(text){
+  return text.split('\n').filter((l, i, a) => !(i === a.length - 1 && l === '')).map(l => {
+    const cls = l[0] === '+' ? 'add' : l[0] === '-' ? 'del' : 'ctx';
+    return '<span class="' + cls + '">' + esc(l || ' ') + '</span>';
+  }).join('\n');
+}
+async function loadTask(id){
+  const gen = ++taskGen;
+  let d;
+  try { d = await api('/api/tasks/' + encodeURIComponent(id) + '?objective=' + encodeURIComponent(state.id)); } catch (e) { return; }
+  if (gen !== taskGen) return;
+  state.task = id;
+  $('taskEmpty').classList.add('hidden');
+  $('taskBody').classList.remove('hidden');
+
+  const findings = (d.reviews || []).flatMap(r => (r.findings || []).map(f => Object.assign({kind:r.kind}, f)));
+  const evidence = (d.evidence || []).map(e =>
+    '<div class="ev"><span class="pill ' + (e.accepted ? 'ok' : 'bad') + '">' + (e.accepted ? '已通过' : '未通过') + '</span> ' +
+    '<span class="mono">' + esc((e.digest || '').slice(0, 12)) + '…</span>' +
+    '<span class="hint"> ' + esc(new Date(e.at).toLocaleString('zh-CN', {hour12:false})) + '</span></div>').join('');
+
+  $('taskBody').innerHTML =
+    '<div class="kv">' +
+      '<div>任务</div><div><b>' + esc(d.id) + '</b> <span class="pill ' + (TASK_CLASS[d.status] || 'plain') + '">' + esc(TASK_LABEL[d.status] || d.status) + '</span></div>' +
+      '<div>产物</div><div class="mono">' + esc(d.artifact || '—') +
+        (d.artifact ? ' <button class="btn small" id="btnDiff">对比改动</button>' : '') + '</div>' +
+      '<div>依赖</div><div>' + esc((d.deps || []).join('、') || '无') + '</div>' +
+      '<div>尝试</div><div>' + d.attempts + ' 次</div>' +
+      (d.error ? '<div>卡在</div><div class="err" style="color:var(--bad)">' + esc(clip(d.error, 200)) + '</div>' : '') +
+    '</div>' +
+    '<div id="diffBox" class="diffbox hidden"></div>' +
+    '<div class="card-head" style="margin-top:1rem"><h2>审查意见</h2></div>' +
+    (d.explanation ? '<div class="explain">' + esc(d.explanation) + '</div>' :
+      (findings.length && state.control ? '<button class="btn small" id="btnExplain">让汇报人解释</button>' : '')) +
+    (findings.length ? '<details' + (d.explanation ? '' : ' open') + '><summary>原文（' + findings.length + ' 条）</summary>' +
+      findings.map(f =>
+        '<div class="finding"><span class="sev ' + esc(f.Severity || '') + '">' + esc(f.Severity || '') + '</span>' +
+        esc(f.Message || '') + '<div class="code">' + esc(f.Code || '') + '</div></div>').join('') + '</details>'
+      : '<div class="hint">没有发现问题。</div>') +
+    '<details><summary>技术细节</summary>' +
+      '<div class="kv" style="margin-top:.5rem">' +
+        '<div>证据</div><div>' + (evidence || '<span class="hint">无</span>') + '</div>' +
+        '<div>产物路径</div><div class="mono">' + esc(d.artifact || '—') + '</div>' +
+      '</div>' +
+    '</details>';
+  renderGraph(state.detail.tasks || []);
+  const diffBtn = document.getElementById('btnDiff');
+  if (diffBtn) diffBtn.onclick = async () => {
+    const box = $('diffBox');
+    box.classList.remove('hidden');
+    box.textContent = '正在对比…';
+    try {
+      const v = await api('/api/diff?objective=' + encodeURIComponent(state.id) + '&task=' + encodeURIComponent(id));
+      if (v.first) { box.textContent = '首次交付，没有可对比的旧版本。'; return; }
+      if (v.binary) { box.textContent = v.changed ? '二进制文件有变化，不显示行级差异。' : '二进制文件与上一版本相同。'; return; }
+      if (v.tooLarge) { box.textContent = '文件太大，暂不显示行级差异。'; return; }
+      if (!v.changed) { box.textContent = '与上一版本相同。'; return; }
+      box.innerHTML = paintDiff(v.diff || '');
+    } catch (e) {
+      box.textContent = '对比失败：' + e.message;
+    }
+  };
+  const explainBtn = document.getElementById('btnExplain');
+  if (explainBtn) explainBtn.onclick = async () => {
+    explainBtn.disabled = true; explainBtn.textContent = '正在解释…';
+    try {
+      await api('/api/tasks/' + encodeURIComponent(id) + '/explain?objective=' + encodeURIComponent(state.id), {method:'POST', body:'{}'});
+      $('jobLine').textContent = '正在解释审查意见…';
+    } catch (e) { alert(e.message); explainBtn.disabled = false; explainBtn.textContent = '让汇报人解释'; }
+  };
+}
+
+/* ---------- timeline ---------- */
+function eventText(e){
+  const label = EVENT_LABEL[e.kind] || e.kind;
+  // Only failures and cancels carry a reason a human needs; "accepted" details
+  // are the artifact's first line, which is noise here.
+  const useful = ['rejected','blocked','objective_cancelled','review_budget','run_timeout','cancel_failed','start_failed'];
+  const detail = useful.includes(e.kind) ? clip(e.detail, 80) : '';
+  return (e.task_id ? '<b>' + esc(e.task_id) + '</b> ' : '') + esc(label) + (detail ? ' · ' + esc(detail) : '');
+}
+
+async function loadEvents(){
+  const last = state.events.length ? state.events[0].seq : 0;
+  const q = '&objective=' + encodeURIComponent(state.id);
+  const path = last ? ('/api/events?after=' + last + '&limit=100' + q) : ('/api/events?tail=100' + q);
+  let page;
+  try { page = await api(path); } catch (e) { return; }
+  const fresh = (page && page.events) || [];
+  const merged = new Map(state.events.map(e => [e.seq, e]));
+  fresh.forEach(e => merged.set(e.seq, e));
+  state.events = [...merged.values()].sort((a, b) => b.seq - a.seq).slice(0, 200);
+  const tl = $('timeline'); tl.textContent = '';
+  if (!state.events.length) { tl.innerHTML = '<span class="empty">还没有事件</span>'; return; }
+  state.events.forEach(e => {
+    const row = document.createElement('div'); row.className = 'ev';
+    row.innerHTML = '<span class="when">' + esc(new Date(e.at).toLocaleTimeString('zh-CN', {hour12:false})) + '</span>' +
+      '<span class="what">' + eventText(e) + '</span>';
+    tl.appendChild(row);
+  });
+}
+
+/* ---------- actions ---------- */
+async function act(path, body){
+  if (state.pending) return;
+  state.pending = true;
+  document.querySelectorAll('#actions .btn').forEach(b => b.disabled = true);
+  try {
+    await api(path, {method:'POST', body: JSON.stringify(body || {})});
+    await loadObjectives(); await loadDetail(); await loadReport(); await loadEvents();
+  } catch (e) { alert(e.message); }
+  finally { state.pending = false; if (state.detail) updateActions(state.detail); }
+}
+
+$('btnPlan').onclick = () => act('/api/objectives/' + encodeURIComponent(state.id) + '/plan');
+$('btnConfirm').onclick = () => act('/api/objectives/' + encodeURIComponent(state.id) + '/confirm');
+$('btnRun').onclick = () => openApproval();
+$('approvalCancel').onclick = () => $('approval').classList.add('hidden');
+$('btnApproveRun').onclick = () => submitApproval();
+
+function openApproval(){
+  const d = state.detail;
+  if (!d) return;
+  const reasons = d.approvalReasons || [];
+  const tasks = (d.tasks || []).filter(t => t.risk === 'high' || (t.commands || []).length);
+  $('approvalReasons').innerHTML = reasons.length
+    ? reasons.map(x => '<div class="approval-reason">' + esc(x) + '</div>').join('')
+    : '<div class="hint">本计划没有高风险任务或命令校验。</div>';
+  $('approvalTasks').innerHTML = tasks.length
+    ? tasks.map(t => '<div class="approval-task"><b>' + esc(t.id) + '</b> · ' + esc(t.risk || 'normal') +
+        (t.commands || []).map(c => '<div><code>' + esc(c) + '</code></div>').join('') + '</div>').join('')
+    : '';
+  $('approveCheck').checked = reasons.length === 0;
+  $('approveCheck').disabled = reasons.length === 0;
+  $('btnApproveRun').disabled = reasons.length > 0;
+  $('approval').classList.remove('hidden');
+}
+
+$('approveCheck').onchange = () => { $('btnApproveRun').disabled = !$('approveCheck').checked; };
+
+async function submitApproval(){
+  const d = state.detail;
+  if (!d) return;
+  $('approval').classList.add('hidden');
+  await act('/api/objectives/' + encodeURIComponent(state.id) + '/run', {
+    reviewer: true,
+    approveRisk: true,
+    maxRuns: Number($('maxRuns').value) || 8,
+    maxReviews: Number($('maxReviews').value) || 8,
+    maxTokens: Number($('maxTokens').value) || 600000
+  });
+}
+$('btnCancel').onclick = () => {
+  if (!confirm('确定取消这个目标？已通过的任务会保留，没完成的会停下。')) return;
+  act('/api/objectives/' + encodeURIComponent(state.id) + '/cancel', {reason:'用户从界面取消'});
+};
+$('btnModelReport').onclick = () => requestReport(false);
+
+/* ---------- continue ---------- */
+$('btnContinue').onclick = () => {
+  $('continuePanel').classList.remove('hidden');
+  $('continueInput').focus();
+};
+$('btnContinueCancel').onclick = () => $('continuePanel').classList.add('hidden');
+$('btnContinueCreate').onclick = async () => {
+  const goal = $('continueInput').value.trim();
+  if (!goal) { $('continueStatus').textContent = '先写清楚要继续做什么。'; return; }
+  $('btnContinueCreate').disabled = true;
+  $('continueStatus').textContent = '正在生成后续计划…';
+  try {
+    await api('/api/objectives/' + encodeURIComponent(state.id) + '/continue', {method:'POST', body: JSON.stringify({goal})});
+    $('continueStatus').textContent = '已提交，生成后这里会刷新。';
+    $('continueInput').value = '';
+    $('continuePanel').classList.add('hidden');
+    await refresh();
+  } catch (e) { $('continueStatus').textContent = '失败：' + e.message; }
+  finally { $('btnContinueCreate').disabled = false; }
+};
+
+/* ---------- new goal ---------- */
+$('newBtn').onclick = () => { $('newPanel').classList.remove('hidden'); $('goalInput').focus(); };
+$('btnNewCancel').onclick = () => $('newPanel').classList.add('hidden');
+$('btnCreate').onclick = async () => {
+  const goal = $('goalInput').value.trim();
+  if (!goal) { $('newStatus').textContent = '先写一句目标。'; return; }
+  $('btnCreate').disabled = true;
+  $('newStatus').textContent = '创建中…';
+  try {
+    const res = await api('/api/goals', {method:'POST', body: JSON.stringify({goal, title: clip(goal, 40)})});
+    $('newStatus').textContent = '已创建，正在生成计划…';
+    await api('/api/objectives/' + encodeURIComponent(res.objective) + '/plan', {method:'POST', body:'{}'})
+      .catch(e => { $('newStatus').textContent = '计划生成失败：' + e.message; });
+    $('goalInput').value = '';
+    await loadObjectives();
+    selectObjective(res.objective);
+    $('newPanel').classList.add('hidden'); $('newStatus').textContent = '';
+  } catch (e) { $('newStatus').textContent = '失败：' + e.message; }
+  finally { $('btnCreate').disabled = false; }
+};
+
+/* ---------- loop ---------- */
+async function loadJobLine(){
+  if (!state.control || !state.id) { $('jobLine').textContent = ''; return; }
+  try {
+    const jobs = await api('/api/jobs');
+    const raw = (jobs && jobs[state.id]) || '';
+    const map = {planning:'正在生成计划…', running:'正在执行…', completed:'执行完成', cancelled:'已取消',
+      cancelling:'正在取消…', 'writing report':'正在生成汇报…', 'report ready':'汇报已生成',
+      'explaining findings':'正在解释审查意见…', explained:'中文解释已生成',
+      'planning continuation':'正在生成后续计划…', 'continuation planned':'后续计划已生成',
+      'continue failed':'后续计划生成失败'};
+    $('jobLine').textContent = map[raw] || raw;
+  } catch (e) { $('jobLine').textContent = ''; }
+}
+
+async function boot(){
+  // #token=... is a convenience for a local demo link; the fragment never
+  // reaches the server.
+  const frag = new URLSearchParams(location.hash.replace(/^#/, ''));
+  if (frag.get('token')) {
+    localStorage.setItem('kernelToken', frag.get('token'));
+    $('token').value = frag.get('token');
+    history.replaceState(null, '', location.pathname);
+  }
+  try { const s = await api('/api/status'); state.control = !!s.control; } catch (e) { state.control = false; }
+  $('mode').textContent = state.control ? '可操作' : '只读';
+  $('mode').className = 'pill ' + (state.control ? 'ok' : 'plain');
+  $('newBtn').classList.toggle('hidden', !state.control);
+  $('token').parentElement.classList.toggle('hidden', !state.control);
+  await loadObjectives();
+  const m = location.hash.match(/^#goal=(.+)$/);
+  if (m) selectObjective(decodeURIComponent(m[1]));
+  if (!state.id && state.objectives.length) selectObjective(state.objectives[0].id);
+  else if (state.id) { await loadDetail(); await loadReport(); await loadEvents(); await loadModels(); }
+}
+
+async function refresh(){
+  await loadObjectives();
+  if (state.id) { await loadDetail(); await loadReport(); await loadEvents(); await loadJobLine(); }
+}
+setInterval(refresh, 3000);
+boot();
+</script>
+</body></html>

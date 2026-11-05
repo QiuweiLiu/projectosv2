@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>ProjectOS 2.0 · 当前实现框架</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: #e9ecf1;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Segoe UI", sans-serif;
+    color: #111827;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { width: 1680px; margin: 0 auto; background: #f6f7f9; padding: 34px 44px 34px; }
+
+  /* header */
+  .header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #dfe3e8; padding-bottom: 15px; }
+  h1 { font-size: 30px; letter-spacing: -0.4px; margin: 0 0 7px; font-weight: 750; }
+  .sub { font-size: 13.5px; color: #4b5563; }
+  .sub b { color: #111827; font-weight: 600; }
+  .meta { text-align: right; }
+  .stats { display: flex; gap: 7px; justify-content: flex-end; margin-bottom: 8px; }
+  .stat { background: #fff; border: 1px solid #e2e6ec; border-radius: 999px; padding: 4px 10px; font-size: 11px; color: #374151; }
+  .stat b { color: #047857; }
+  .date { font-size: 10.5px; color: #8a94a6; letter-spacing: .02em; }
+
+  /* runtime ribbon */
+  .flow { margin-top: 16px; background: #0f172a; border-radius: 13px; padding: 14px 18px; display: flex; align-items: center; gap: 8px; color: #e5e7eb; }
+  .flow .step { display: flex; gap: 7px; align-items: center; white-space: nowrap; }
+  .flow .n { width: 21px; height: 21px; border-radius: 50%; background: #2563eb; color: #fff; display: grid; place-items: center; font-size: 10.5px; font-weight: 700; flex: none; }
+  .flow .t { font-size: 12px; } .flow .t b { font-weight: 600; }
+  .flow .arrow { color: #475569; font-size: 14px; }
+  .flow .loop { margin-left: auto; font-size: 10.3px; color: #94a3b8; border-left: 1px solid #334155; padding-left: 13px; line-height: 1.55; max-width: 300px; white-space: nowrap; }
+
+  /* layer scaffolding */
+  .layer { margin-top: 18px; }
+  .layer-head { display: flex; align-items: baseline; gap: 9px; margin-bottom: 8px; }
+  .layer-num { font-size: 10px; font-weight: 800; color: #2563eb; letter-spacing: .14em; }
+  .layer-title { font-size: 14.5px; font-weight: 700; }
+  .layer-hint { font-size: 10.5px; color: #6b7280; }
+
+  .card { background: #fff; border: 1px solid #e1e5ea; border-radius: 12px; box-shadow: 0 1px 2px rgba(16,24,40,.04); padding: 13px 16px; }
+  .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+  .card-head b { font-size: 13.5px; }
+  .hint { font-size: 10.3px; color: #8a94a6; }
+  .tag { font-size: 9.5px; padding: 2px 7px; border-radius: 999px; font-weight: 600; white-space: nowrap; }
+  .tag.done { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+  .tag.part { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+  .tag.no { background: #f3f4f6; color: #6b7280; border: 1px dashed #cbd5e1; }
+
+  /* chips */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font-size: 11px; background: #f7f8fa; border: 1px solid #e5e9ef; border-radius: 7px; padding: 4px 8px; color: #374151; white-space: nowrap; }
+  .chip b { color: #111827; font-weight: 600; }
+  .foot { margin-top: 9px; font-size: 10.5px; color: #6b7280; line-height: 1.55; }
+
+  /* connectors */
+  .conn { display: flex; align-items: center; justify-content: center; gap: 10px; height: 30px; }
+  .conn .stem { width: 1px; height: 18px; background: #c3cbd6; position: relative; }
+  .conn .stem::after { content: ""; position: absolute; left: -3px; bottom: -1px; border-left: 3.5px solid transparent; border-right: 3.5px solid transparent; border-top: 5px solid #c3cbd6; }
+  .conn .lab { font-size: 10px; color: #5b6678; background: #eef1f5; border-radius: 999px; padding: 2px 9px; }
+
+  /* layer 2 */
+  .split2 { display: grid; grid-template-columns: 1.12fr .88fr; gap: 18px; }
+  .api-title { font-size: 10.5px; font-weight: 700; color: #64748b; letter-spacing: .06em; margin-bottom: 6px; }
+  .api-list { display: flex; flex-direction: column; gap: 3px; }
+  .api { display: flex; gap: 7px; align-items: baseline; font-size: 10.8px; color: #374151; line-height: 1.45; }
+  .api code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.2px; background: #f4f6f9; border: 1px solid #e8ebf0; border-radius: 4px; padding: 1px 5px; color: #0f172a; white-space: nowrap; }
+  .api span { color: #6b7280; }
+  .metrics { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 9px; padding-top: 8px; border-top: 1px dashed #e5e7eb; }
+  .metric { font-size: 10.4px; color: #475569; }
+  .metric b { color: #111827; }
+
+  /* kernel */
+  .grid3 { display: grid; grid-template-columns: 1fr 1.03fr 1.1fr; gap: 11px; }
+  .subcard { border: 1px solid #e8ebf0; border-radius: 9px; padding: 10px 12px; background: #fcfcfd; }
+  .subcard h4 { margin: 0 0 6px; font-size: 11.8px; color: #1f2937; display: flex; gap: 6px; align-items: center; }
+  .subcard h4 .dot { width: 6px; height: 6px; border-radius: 50%; background: #2563eb; flex: none; }
+  .subcard h4 small { font-size: 9.5px; color: #8a94a6; font-weight: 500; }
+  .subcard ul { margin: 0; padding-left: 14px; }
+  .subcard li { font-size: 10.9px; line-height: 1.62; color: #374151; }
+  .subcard li b { color: #0f172a; font-weight: 600; }
+  .storebar { margin-top: 11px; background: #f8fafc; border: 1px solid #e2e8f0; border-left: 3px solid #2563eb; border-radius: 7px; padding: 8px 12px; font-size: 10.8px; color: #334155; display: flex; flex-wrap: wrap; gap: 3px 15px; }
+  .storebar b { color: #0f172a; }
+
+  /* roles */
+  .roles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 9px; }
+  .role { border: 1px solid #e6e1f5; background: #fcfbff; border-radius: 9px; padding: 9px 11px; }
+  .role .name { font-size: 12px; font-weight: 700; display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  .role .name code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; }
+  .perm { font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 999px; white-space: nowrap; }
+  .perm.ro { background: #eef2ff; color: #4338ca; }
+  .perm.rw { background: #fff7ed; color: #c2410c; }
+  .role p { margin: 5px 0 0; font-size: 10.4px; line-height: 1.5; color: #4b5563; }
+
+  /* exec */
+  .grid3b { display: grid; grid-template-columns: 1.15fr .8fr 1fr; gap: 11px; }
+  .exec h4 { margin: 0 0 5px; font-size: 11.8px; display: flex; gap: 7px; align-items: center; }
+  .exec p { margin: 0 0 5px; font-size: 10.6px; line-height: 1.55; color: #374151; }
+  .exec ul { margin: 0; padding-left: 14px; }
+  .exec li { font-size: 10.4px; line-height: 1.55; color: #4b5563; }
+  .exec code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.9px; background: #f4f6f9; border: 1px solid #e8ebf0; border-radius: 4px; padding: 0 4px; }
+  .exec.off { border-style: dashed; background: #fbfbfc; }
+  .exec.off h4 { color: #6b7280; }
+
+  /* files */
+  .files { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px 9px; }
+  .file { font-size: 10.2px; color: #4b5563; border: 1px solid #e8ebf0; border-radius: 7px; padding: 5px 8px; background: #fcfcfd; line-height: 1.45; }
+  .file b { display: block; font-size: 10.6px; color: #0f172a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }
+
+  /* bottom */
+  .bottom { display: grid; grid-template-columns: 1.05fr .95fr; gap: 11px; margin-top: 18px; }
+  .status { background: #fff; border: 1px solid #e1e5ea; border-radius: 12px; padding: 12px 15px; }
+  .status h3 { margin: 0 0 7px; font-size: 12.5px; display: flex; align-items: center; gap: 7px; }
+  .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 16px; }
+  .item { font-size: 10.4px; line-height: 1.5; color: #374151; display: flex; gap: 6px; }
+  .item::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #10b981; margin-top: 5px; flex: none; }
+  .item.gray { color: #6b7280; }
+  .item.gray::before { background: #cbd5e1; box-shadow: none; }
+  .status.off { background: #fbfbfc; border-style: dashed; }
+  .status.off h3 { color: #4b5563; }
+  .note { margin-top: 10px; font-size: 9.8px; color: #8a94a6; line-height: 1.55; }
+  .rule { width: 3px; height: 12px; border-radius: 2px; background: #10b981; }
+  .rule.gray { background: #cbd5e1; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="header">
+    <div>
+      <h1>ProjectOS 2.0 · 当前实现框架</h1>
+      <div class="sub">自然语言目标 → 计划 → <b>人工确认</b> → 多 Agent 并行执行 → <b>三层验收</b> → 交付与继续改进</div>
+    </div>
+    <div class="meta">
+      <div class="stats">
+        <div class="stat"><b>174</b> 项 Go 测试</div>
+        <div class="stat">race / vet 全绿</div>
+        <div class="stat">多目标 / 审批 / diff / 原生壳</div>
+      </div>
+      <div class="date">2026-11-05 · 实线 = 已实现 · 虚线 = 未实现 / 受限 · 设计稿不算实现证据</div>
+    </div>
+  </div>
+
+  <div class="flow">
+    <div class="step"><span class="n">1</span><span class="t"><b>目标</b> create</span></div>
+    <span class="arrow">→</span>
+    <div class="step"><span class="n">2</span><span class="t"><b>计划</b> 模型只提案</span></div>
+    <span class="arrow">→</span>
+    <div class="step"><span class="n">3</span><span class="t"><b>确认 + 审批</b> 人</span></div>
+    <span class="arrow">→</span>
+    <div class="step"><span class="n">4</span><span class="t"><b>执行</b> 并行 DAG</span></div>
+    <span class="arrow">→</span>
+    <div class="step"><span class="n">5</span><span class="t"><b>验收</b> 三层</span></div>
+    <span class="arrow">→</span>
+    <div class="step"><span class="n">6</span><span class="t"><b>交付</b> out/</span></div>
+    <span class="arrow">→</span>
+    <div class="step"><span class="n">7</span><span class="t"><b>汇报 + 快照</b></span></div>
+    <div class="loop">continue：追加任务；已验收不重跑、不改写。目标可并行。</div>
+  </div>
+
+  <!-- 1 user -->
+  <div class="layer">
+    <div class="layer-head"><span class="layer-num">① 用户层</span><span class="layer-title">浏览器驾驶舱</span><span class="layer-hint">cmd/kernel/ui.html · 单页 · 无框架 · 无构建 · 3s 轮询</span></div>
+    <div class="card">
+      <div class="card-head"><b>Cockpit</b><span class="tag done">已实现</span><span class="hint">中文界面；技术细节默认折叠；写按钮仅在 --control 时渲染</span></div>
+      <div class="chips">
+        <span class="chip">目标列表</span>
+        <span class="chip">新建目标</span>
+        <span class="chip">计划预览 / 确认</span>
+        <span class="chip">任务图（DAG 分层 + 连线）</span>
+        <span class="chip">任务证据与审查 findings</span>
+        <span class="chip">事件时间线</span>
+        <span class="chip">成果预览：图片 / 视频 / 音频 / 文本</span>
+        <span class="chip">执行审批：风险 / 命令 / 预算</span>
+        <span class="chip">产物 diff</span>
+        <span class="chip">多目标切换</span>
+        <span class="chip">继续改进</span>
+        <span class="chip">角色模型下拉</span>
+        <span class="chip">中文汇报卡片</span>
+        <span class="chip">取消 / 重跑</span>
+      </div>
+      <div class="foot">token 从 URL <code>#token=…</code> 读取后转存 localStorage 并清除地址栏片段；页面不持有模型凭据。</div>
+    </div>
+  </div>
+
+  <div class="conn"><span class="stem"></span><span class="lab">HTTP · 仅回环地址 · X-Kernel-Token（<code>control-token</code> 0600）</span></div>
+
+  <!-- 2 api -->
+  <div class="layer">
+    <div class="layer-head"><span class="layer-num">② 接口层</span><span class="layer-title">kernel serve</span><span class="layer-hint">本地 API + 后台服务；同一内核也可直接用 CLI：goal create / plan / confirm / run / cancel / continue / status</span></div>
+    <div class="card">
+      <div class="split2">
+        <div>
+          <div class="api-title">读接口（无需 token，只读快照）</div>
+          <div class="api-list">
+            <div class="api"><code>GET /api/objectives</code><span>目标列表 + 任务计数</span></div>
+            <div class="api"><code>GET /api/objectives/{id}</code><span>当前计划、任务、交付状态</span></div>
+            <div class="api"><code>GET /api/tasks/{id}?objective=</code><span>证据 / 审查 / 中文解释</span></div>
+            <div class="api"><code>GET /api/events?objective=&amp;after=N</code><span>游标分页，不重复</span></div>
+            <div class="api"><code>GET /api/models</code><span>各角色设置 + 模型缓存</span></div>
+            <div class="api"><code>GET /api/report?objective=</code><span>中文汇报 + 成果清单</span></div>
+            <div class="api"><code>GET /api/diff?objective=&amp;task=</code><span>最新尝试 vs 上次交付</span></div>
+            <div class="api"><code>GET /files/{objective}/{path}</code><span>只读 out/，支持 Range</span></div>
+          </div>
+        </div>
+        <div>
+          <div class="api-title">写接口（--control + token）</div>
+          <div class="api-list">
+            <div class="api"><code>POST /api/goals</code><span>创建目标；runNow 可串行跑完</span></div>
+            <div class="api"><code>POST …/confirm</code><span>确认当前草案计划</span></div>
+            <div class="api"><code>POST …/run</code><span>执行已确认计划</span></div>
+            <div class="api"><code>POST …/cancel</code><span>协作式取消</span></div>
+            <div class="api"><code>POST …/continue</code><span>追加任务，生成新计划版本</span></div>
+            <div class="api"><code>POST …/report</code><span>模型重写中文汇报</span></div>
+            <div class="api"><code>POST /api/models</code><span>保存角色模型；refresh 刷新列表</span></div>
+            <div class="api"><code>POST /api/tasks/{id}/explain</code><span>findings 中文化（哈希缓存）</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="metrics">
+        <span class="metric"><b>--daemon / --stop / --status</b>：serve.json + pid 检测</span>
+        <span class="metric"><b>--stop 只停客户端</b>：已托管任务继续执行</span>
+        <span class="metric"><b>写操作 = 子进程</b> <code>kernel goal …</code>，Kernel 始终是唯一写者</span>
+        <span class="metric">读命令用只读连接，<b>不触发恢复</b></span>
+        <span class="metric">token 重启保持不变</span>
+        <span class="metric"><b>Workspace</b>：一个 serve 聚合多个 <code>projects/&lt;id&gt;</code></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="conn"><span class="stem"></span><span class="lab">同一进程内调用 · 目标 / 计划 / 任务状态</span></div>
+
+  <!-- 3 kernel -->
+  <div class="layer">
+    <div class="layer-head"><span class="layer-num">③ 编排层</span><span class="layer-title">Kernel 内核</span><span class="layer-hint">Go 单二进制 · 无外部队列 / 无 Redis / 无 K8s · SQLite 单写者</span></div>
+    <div class="card">
+      <div class="grid3">
+        <div class="subcard">
+          <h4><span class="dot"></span>目标与计划 <small>goal / objective</small></h4>
+          <ul>
+            <li>目标状态机：<b>draft → planned → active → completed / failed / cancelled</b></li>
+            <li>计划<b>版本化</b>（v1…vn）；草案必须人工确认后才执行</li>
+            <li>模型只提案：不接受自由文本计划，编译前强校验</li>
+            <li>继续改进：最多新增 <b>5</b> 个任务、产物全局唯一、已验收任务原样保留</li>
+            <li>字段语义：<b>artifacts / validators / deps / maxAttempts</b> 强制执行；scope / inputs 仅作提示</li>
+            <li><b>Workspace 多目标</b>：每个目标独立 <code>projects/&lt;id&gt;</code>、锁与预算，可并行执行</li>
+          </ul>
+        </div>
+        <div class="subcard">
+          <h4><span class="dot"></span>编译与调度 <small>compile / replan / engine</small></h4>
+          <ul>
+            <li><b>compile</b>：计划 → Task + 绑定校验器；DAG 依赖成图</li>
+            <li>并行执行（默认并发 <b>2</b>），按 maxAttempts 重试</li>
+            <li>有界重规划：<b>1 次</b>、≤5 个新任务、必须新 ID，不触碰已验收</li>
+            <li>规范化保护：模型改写已验收结果会被还原</li>
+            <li>取消 = 协作式请求：写 <b>cancel</b> 标记 → 持锁调度器 Abort 会话</li>
+            <li>重试继续同一 <b>session</b>，但仍使用新的工作目录；审查/验收始终新会话</li>
+          </ul>
+        </div>
+        <div class="subcard">
+          <h4><span class="dot"></span>验收与交付 <small>verify / review / delivery</small></h4>
+          <ul>
+            <li><b>三层</b>：确定性校验 → reviewer（有无缺陷）→ acceptance（是否完成需求）</li>
+            <li>reviewer 与 acceptance 是<b>两次独立会话</b>；同版本各限一次；预算覆盖两者</li>
+            <li>交付：组装 <b>out/</b> → 在副本上重跑 command 校验 → 写 delivery.md</li>
+            <li>汇报：模型优先，规则兜底；状态变化使旧汇报失效</li>
+            <li><b>执行前审批</b>：高风险任务或 command 校验必须显式 <code>--approve-risk</code></li>
+            <li>完成顺序：交付 + 快照都成功后，<b>最后</b>写 completed；失败保持 active 可重跑</li>
+          </ul>
+        </div>
+      </div>
+      <div class="storebar">
+        <span><b>SQLite 单写者</b>（kernel.lock）</span>
+        <span><b>Task / Run 分离</b>，陈旧 Run 拒绝结算</span>
+        <span>启动恢复：running Run → unknown，running Task → blocked</span>
+        <span>验收结论按 <b>kind='acceptance'</b> 读取，targeted review 不能覆盖阻断</span>
+        <span>预算：runs / reviews / tokens + 单次超时</span>
+        <span>quarantine 持久化：DB 失败 → <b>QUARANTINE</b> 文件兜底</span>
+        <span>token：provider 实测优先，缺失才标注<b>估算</b></span>
+        <span>work/ 默认保留最新 <b>20</b> 个尝试目录，<code>goal prune</code> 可调</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="conn"><span class="stem"></span><span class="lab">exec.Backend · 每个角色一次独立会话 · 模型按角色解析</span></div>
+
+  <!-- 4 roles -->
+  <div class="layer">
+    <div class="layer-head"><span class="layer-num">④ 角色层</span><span class="layer-title">五类模型角色</span><span class="layer-hint">规划 / 执行 / 审查 / 验收 / 汇报职责分离；模型来自 OpenCode 已注册列表</span></div>
+    <div class="card">
+      <div class="roles">
+        <div class="role">
+          <div class="name"><code>planner</code><span class="perm ro">只读</span></div>
+          <p>规划与重规划；只产出计划 JSON。显式 <code>ApprovalMode=default</code>，不会获得 --auto 写权限。</p>
+        </div>
+        <div class="role">
+          <div class="name"><code>worker</code><span class="perm rw">可写</span></div>
+          <p>在独立任务目录产出产物；<code>--auto</code> 执行；重试续同一会话。</p>
+        </div>
+        <div class="role">
+          <div class="name"><code>reviewer</code><span class="perm ro">只读</span></div>
+          <p>判断“有没有缺陷”；P0/P1 阻断；不判断需求是否完成。</p>
+        </div>
+        <div class="role">
+          <div class="name"><code>acceptance</code><span class="perm ro">只读</span></div>
+          <p>判断“是否真的完成任务”；缺需求即阻断；与 reviewer 独立。</p>
+        </div>
+        <div class="role">
+          <div class="name"><code>reporter</code><span class="perm ro">只读生成</span></div>
+          <p>把状态与 findings 转成中文汇报 / 解释；按输入哈希缓存。</p>
+        </div>
+      </div>
+      <div class="foot">模型解析优先级：<b>CLI 参数 &gt; &lt;state&gt;/models.json &gt; 内置默认</b>；reviewer / acceptance 未设置时跟随 worker。驾驶舱保存到同一份 models.json；模型列表缓存，显式刷新。不内置 provider 凭据，能否使用取决于运行环境的 OpenCode 注册表。</div>
+    </div>
+  </div>
+
+  <div class="conn"><span class="stem"></span><span class="lab">启动子进程 / 会话 · 隔离目录 · 收集事件与用量</span></div>
+
+  <!-- 5 exec -->
+  <div class="layer">
+    <div class="layer-head"><span class="layer-num">⑤ 执行层</span><span class="layer-title">执行后端与确定性校验</span><span class="layer-hint">默认 opencode CLI；AO 链路保留但当前不可用于已注册模型</span></div>
+    <div class="grid3b">
+      <div class="card exec">
+        <h4>opencode CLI <span class="tag done">默认</span></h4>
+        <p><code>opencode run --standalone</code> · 子进程 + JSONL 事件流</p>
+        <ul>
+          <li>隔离：有 repo 用 <b>git worktree</b>，否则目录拷贝（跳过 .git）</li>
+          <li>取消：进程组 <b>SIGTERM → 5s → SIGKILL</b></li>
+          <li>崩溃回收：<code>.kernel-run.pid</code> + 进程 cwd 校验</li>
+          <li>用量：读取 <code>part.tokens</code> 实测值；缺失才估算</li>
+          <li>权限：worker 传 --auto；规划 / 审查 / 验收不传</li>
+          <li>会话：重试传 <code>--session</code>，续对话上下文</li>
+          <li>清理：每次收尾按 <code>--keep-work</code> 保留最新 N 个目录</li>
+        </ul>
+      </div>
+      <div class="card exec off">
+        <h4>AO <span class="tag part">可选 / 受限</span></h4>
+        <p><code>--executor ao</code> 保留原链路（session API、多轮会话）。</p>
+        <ul>
+          <li>v1 harness 依赖 <b>tmux</b></li>
+          <li>v2 harness 在真实 HOME 下认证检查失败</li>
+          <li>因此“AO + 已注册模型”当前未打通</li>
+        </ul>
+      </div>
+      <div class="card exec">
+        <h4>确定性校验 <span class="tag done">Kernel 执行</span></h4>
+        <p>不依赖模型判断，先跑硬校验：</p>
+        <ul>
+          <li><code>exact</code> / <code>nonempty</code> / <code>contains</code> / <code>regex</code></li>
+          <li><code>command</code>：退出码；组装后再跑一遍</li>
+          <li>command 走白名单，但<b>不是沙箱</b>（docs/security.md）</li>
+          <li>产物路径拒绝 <code>..</code> 与符号链接越界</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="conn"><span class="stem"></span><span class="lab">读 / 写 · 所有权威状态落在一个状态目录</span></div>
+
+  <!-- 6 state -->
+  <div class="layer">
+    <div class="layer-head"><span class="layer-num">⑥ 状态与产物</span><span class="layer-title">状态目录 D/</span><span class="layer-hint">SQLite 是唯一真相源；out/ 与 .project/ 是派生视图</span></div>
+    <div class="card">
+      <div class="files">
+        <div class="file"><b>kernel.db</b>目标 / 计划版本 / 任务 / Run / 审查 / 事件</div>
+        <div class="file"><b>kernel.lock</b>单写者锁；第二个写进程被拒绝</div>
+        <div class="file"><b>work/&lt;task&gt;/</b>隔离工作区：worktree 或目录副本</div>
+        <div class="file"><b>out/</b>交付产物；只读文件服务，禁止越界</div>
+        <div class="file"><b>delivery.md</b>交付报告 + 校验结果</div>
+        <div class="file"><b>.project/</b>恢复快照（成功交付后原子写）</div>
+        <div class="file"><b>projects/&lt;id&gt;/</b>每个目标独立 DB / work / out</div>
+        <div class="file"><b>models.json</b>Workspace 共用的角色模型</div>
+        <div class="file"><b>models-cache.json</b>可用模型列表缓存</div>
+        <div class="file"><b>serve.json / serve.log</b>pid、地址、control 标志、日志</div>
+        <div class="file"><b>control-token</b>0600；写接口鉴权</div>
+        <div class="file"><b>cancel</b>协作式取消请求标记</div>
+        <div class="file"><b>QUARANTINE</b>DB 写失败时的隔离兜底</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- bottom -->
+  <div class="bottom">
+    <div class="status">
+      <h3><span class="rule"></span>已实现并验证</h3>
+      <div class="cols2">
+        <div class="item">目标 → 计划 → 确认 → 执行 → 验收 → 交付闭环</div>
+        <div class="item">并行 DAG + 失败重试 + 有界重规划</div>
+        <div class="item">三层验收（确定性 / 缺陷 / 完成度）</div>
+        <div class="item">交付组装与 command 复验、符号链接防护</div>
+        <div class="item"><b>多目标 Workspace</b>：独立锁 / 预算 / out，可并行</div>
+        <div class="item"><b>执行前审批</b>：高风险 / 命令 / 预算</div>
+        <div class="item"><b>文本产物 diff</b>：最新尝试 vs 上次交付</div>
+        <div class="item"><b>会话续跑</b>：重试传 <code>--session</code></div>
+        <div class="item"><b>work/ 保留策略</b> + <code>goal prune</code></div>
+        <div class="item"><b>token 实测优先</b>，缺失才估算</div>
+        <div class="item"><b>macOS 原生外壳</b>（WKWebView，非 Electron）</div>
+        <div class="item">174 测试 + race + vet；6 类故障注入</div>
+      </div>
+      <div class="note">故障注入覆盖：quarantine 写库失败、快照写失败、交付报告写失败、SQLite 损坏、陈旧取消标记、空闲取消。真实流程：多目标创建 / 切换 / 并行、审批弹窗、diff、桌面 <code>--check</code>。</div>
+    </div>
+    <div class="status off">
+      <h3><span class="rule gray"></span>明确未实现 / 未验证</h3>
+      <div class="cols2">
+        <div class="item gray">SSE 推送（现为轮询 + 游标）</div>
+        <div class="item gray">Windows / Linux（含桌面壳）</div>
+        <div class="item gray">逐工具调用审批拦截（当前是执行前审批）</div>
+        <div class="item gray">二进制产物行级 diff（只标有变化）</div>
+        <div class="item gray">AO + 已注册模型（auth / tmux）</div>
+        <div class="item gray">取消与调度器完成的进程级并发交错</div>
+        <div class="item gray">磁盘满 / 只读挂载</div>
+        <div class="item gray">运行中 SQLite 失效</div>
+        <div class="item gray">桌面签名 / 公证 / 自动更新</div>
+      </div>
+      <div class="note">未实现项不出现在主链路里；它们不是“待画”，而是当前版本的真实边界。</div>
+    </div>
+  </div>
+
+  <div class="note" style="margin-top:14px;">依据：<code>internal/*</code> 包、<code>cmd/kernel/serve.go</code> / <code>ui.html</code>、<code>docs/api.md</code>、<code>reports/*</code>。模型名不写死在图中：默认值随环境与 <code>models.json</code> 变化。</div>
+
+</div>
+</body>
+</html>
