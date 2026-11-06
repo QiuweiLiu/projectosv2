@@ -217,3 +217,13 @@ func TestParseHandoffDropsChatMetaInstructions(t *testing.T) {
 		t.Fatalf("draft = %+v", draft)
 	}
 }
+
+func TestCleanGoalRemovesEnglishChatMetaClause(t *testing.T) {
+	goal := "Create notes.txt with hello. Do not use any other tools."
+	if got := cleanGoal(goal); got != "Create notes.txt with hello." {
+		t.Fatalf("goal = %q", got)
+	}
+	if got := cleanGoal("只回复收到"); got != "" {
+		t.Fatalf("meta-only goal = %q", got)
+	}
+}

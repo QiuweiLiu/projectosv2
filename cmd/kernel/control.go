@@ -329,13 +329,18 @@ func (c *controlServer) objectiveAction(w http.ResponseWriter, r *http.Request, 
 		writeJSON(w, map[string]string{"objective": id, "status": "planning continuation"})
 	case "recover":
 		var req struct {
-			Approve bool `json:"approve"`
+			Approve bool   `json:"approve"`
+			Task    string `json:"task"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil && err != io.EOF {
 			http.Error(w, "bad json", http.StatusBadRequest)
 			return
 		}
-		st, err := openGoalStore(p.Dir)
+		open := openGoalStoreRead
+		if req.Approve {
+			open = openGoalStore
+		}
+		st, err := open(p.Dir)
 		if err != nil {
 			http.Error(w, "store busy: "+err.Error(), http.StatusConflict)
 			return
@@ -363,8 +368,25 @@ func (c *controlServer) objectiveAction(w http.ResponseWriter, r *http.Request, 
 			if hasPending {
 				taskID, reason = pending.TaskID, pending.Reason
 			}
+			if strings.TrimSpace(req.Task) != "" {
+				taskID, reason = strings.TrimSpace(req.Task), "explicit human approval after inspection"
+			} else {
+				if decision.Action == "stop" || decision.Action == "replan" {
+					http.Error(w, "recovery requires replan or is not allowed: "+decision.Reason, http.StatusConflict)
+					return
+				}
+				if hasPending && pending.Category == "unknown_execution_state" {
+					http.Error(w, "unknown outcome requires explicit task after inspection", http.StatusConflict)
+					return
+				}
+			}
 			if taskID == "" {
 				http.Error(w, "no recoverable failure", http.StatusConflict)
+				return
+			}
+			count, cerr := recovery.Increment(st)
+			if cerr != nil {
+				http.Error(w, "recovery budget: "+cerr.Error(), http.StatusInternalServerError)
 				return
 			}
 			ok, err := st.RequeueBlocked(domain.TaskID(taskID), "recovery approved: "+reason, 3)
@@ -372,7 +394,6 @@ func (c *controlServer) objectiveAction(w http.ResponseWriter, r *http.Request, 
 				http.Error(w, "task is not retryable", http.StatusConflict)
 				return
 			}
-			count, _ := recovery.Increment(st)
 			_ = recovery.ClearPending(st)
 			if obj.Status == goal.StatusFailed {
 				if err := st.MoveObjective(obj.ID, goal.StatusDraft); err == nil {

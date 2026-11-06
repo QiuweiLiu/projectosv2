@@ -48,8 +48,14 @@ func Generate(ctx context.Context, p Planner, req Request, attempts int) (goal.P
 	// Keep every attempt error. Overwriting with the last one hides the real
 	// rejection behind an exhausted planner or a provider retry.
 	var errs []error
+	var usage Result
 	for i := 0; i < attempts; i++ {
 		result, err := p.Plan(ctx, req)
+		usage.PromptChars += result.PromptChars
+		usage.OutputChars += result.OutputChars
+		usage.PromptTokens += result.PromptTokens
+		usage.OutputTokens += result.OutputTokens
+		usage.UsageEstimated = usage.UsageEstimated || result.UsageEstimated
 		if err != nil {
 			errs = append(errs, fmt.Errorf("attempt %d: %w", i+1, err))
 			req.Feedback = "previous attempt failed: " + err.Error()
@@ -65,6 +71,11 @@ func Generate(ctx context.Context, p Planner, req Request, attempts int) (goal.P
 			req.Feedback = "previous plan was rejected: " + err.Error()
 			continue
 		}
+		result.PromptChars = usage.PromptChars
+		result.OutputChars = usage.OutputChars
+		result.PromptTokens = usage.PromptTokens
+		result.OutputTokens = usage.OutputTokens
+		result.UsageEstimated = usage.UsageEstimated
 		return result.Plan, result, nil
 	}
 	return goal.Plan{}, Result{}, fmt.Errorf("planner failed after %d attempts: %w", attempts, errors.Join(errs...))

@@ -63,14 +63,30 @@ func Decide(st *store.Store, obj goal.Objective, needsApproval bool, policy Poli
 	d.Reason = report.Failure.Category
 	d.Recoverable = report.Failure.Recoverable
 	d.RequiresApproval = report.Failure.RequiresApproval
+	// Human approval is not an automatic recovery: it is allowed even after the
+	// auto-recovery budget is spent. The budget still bounds retries below.
+	if report.Failure.RequiresApproval {
+		task, ok, err := st.Get(domain.TaskID(report.Failure.TaskID))
+		if err != nil {
+			return d, err
+		}
+		if !ok || task.Status != domain.TaskBlocked && task.Status != domain.TaskRejected {
+			d.Action = "stop"
+			d.Reason = "task is no longer retryable"
+			return d, nil
+		}
+		if task.Attempts >= policy.AttemptCap {
+			d.Action = "stop"
+			d.Reason = "attempt cap reached"
+			return d, nil
+		}
+		d.Action = "approve"
+		d.Reason = "approval is required before this task can be retried"
+		return d, nil
+	}
 	if policy.MaxRecoveries >= 0 && report.RecoveryCount >= policy.MaxRecoveries {
 		d.Action = "stop"
 		d.Reason = "recovery budget exhausted"
-		return d, nil
-	}
-	if report.Failure.RequiresApproval {
-		d.Action = "approve"
-		d.Reason = "approval is required before this task can be retried"
 		return d, nil
 	}
 	if report.Failure.Recoverable {

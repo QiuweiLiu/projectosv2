@@ -16,7 +16,7 @@ Recovery 不是第二套 Scheduler。它读取既有 Task/Run/Review 事实，�
 | `provider_transient` | 429/overloaded/ECONNRESET/timeout | 有界重试 |
 | `artifact_mismatch` | `verification:` | 带原错误重试 |
 | `review_blocked` | blocking review / `review:` / `acceptance:` | 带 findings 定向重试 |
-| `dependency_failure` | `dependency` | 有界 replan |
+| `dependency_failure` | `dependency` | 有界 replan（需 `goal run --replan`） |
 | `environment_failure` | start/prompt/collect/observe | 人工检查执行器 |
 | `cancelled` | cancel | 不重试 |
 | `unknown` | 无法归类 | 人工检查 |

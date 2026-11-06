@@ -741,6 +741,33 @@ func blockingOnly(findings []domain.Finding) []domain.Finding {
 	return out
 }
 
+// retryFindings returns only a blocking review of the exact artifact state that
+// just failed. An older review of a previous version must not hide a newer
+// verification error from the retry prompt.
+func (e *Engine) retryFindings(task domain.Task) ([]domain.Finding, error) {
+	evidence, err := e.store.EvidenceFor(task.ID)
+	if err != nil {
+		return nil, err
+	}
+	version := ""
+	for _, ev := range evidence {
+		version = ev.ArtifactVersion
+	}
+	if version == "" {
+		return e.store.LastReviewFindings(task.ID)
+	}
+	reviews, err := e.store.ReviewsFor(task.ID)
+	if err != nil {
+		return nil, err
+	}
+	for i := len(reviews) - 1; i >= 0; i-- {
+		if reviews[i].ArtifactVersion == version && reviews[i].Blocking() {
+			return reviews[i].Findings, nil
+		}
+	}
+	return nil, nil
+}
+
 // reviewFingerprint binds a review to the exact artifact state a reviewer saw.
 func reviewFingerprint(artifact exec.Artifact) string {
 	files := append([]string(nil), artifact.Files...)
@@ -863,7 +890,7 @@ func (e *Engine) expandPrompt(task domain.Task) (string, error) {
 		// A retry that only hears "a blocking finding happened" has to guess. Give
 		// it the reviewer's actual words, or it burns another round rediscovering
 		// the same defect.
-		findings, ferr := e.store.LastReviewFindings(task.ID)
+		findings, ferr := e.retryFindings(task)
 		if ferr != nil {
 			return "", ferr
 		}

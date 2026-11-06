@@ -111,7 +111,7 @@ Kernel 不包含 Research 术语；`.project/` 仍是人类可读的权威摘要
   - **M3 最小**：Project catalog + 目标目录 `project.json` 归属；
     `project-state/<id>/.project/` 从目标库重建项目级 PROJECT/STATE/HANDOFF/DECISIONS；
     快照有 8KB/条目上限，支持 `GET /api/projects/{id}`、refresh、decisions 和 CLI。
-  - 266 项测试 + race + vet；真实聊天、工具权限、重启恢复、Objective acceptance 已验证。
+  - 272 项测试 + race + vet；真实聊天、工具权限、重启恢复、Objective acceptance 已验证。
 - **P3.0–P3.2（2026-11-06）**：
   - Objective acceptance 缓存绑定完整 plan、验收条件、所有产物完整内容哈希；同输入复用，
     任何实质变化重新判定。
@@ -120,7 +120,7 @@ Kernel 不包含 Research 术语；`.project/` 仍是人类可读的权威摘要
   - 多轮聊天 Goal Draft：来源消息、context version、可编辑确认；确认只创建 Objective + 计划，
     计划仍需二次确认。
   - Project Context 注入聊天首条消息和 Planner `--context`；项目快照包含已验证产物内容。
-  - 266 项测试 + race + vet；真实 notes 目标完成 handoff→执行→验收→交付。
+  - 272 项测试 + race + vet；真实 notes 目标完成 handoff→执行→验收→交付。
 - 尚未实现：Windows/Linux、
   托管任务逐工具审批、二进制行级 diff、P3.3 智能干预、P3.5 磁盘/SQLite 故障注入。
 

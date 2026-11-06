@@ -630,7 +630,7 @@ async function loadRecovery(){
   ];
   if (f.evidence && f.evidence.length) lines.push('证据：' + f.evidence.filter(Boolean).slice(0, 3).join(' / '));
   body.innerHTML = lines.map(x => '<div>' + esc(clip(x, 220)) + '</div>').join('');
-  const show = state.control && (f.action === 'approve' || (f.action === 'retry' && r.recoveryAvailable));
+  const show = state.control && ((r.state === 'recoverable_failure' && f.action === 'retry' && r.recoveryAvailable) || (r.state === 'needs_approval' && f.action === 'approve'));
   actions.style.display = show ? '' : 'none';
   btn.disabled = !show || state.pending;
   btn.textContent = f.requiresApproval ? '批准并重新排队' : '重新排队';

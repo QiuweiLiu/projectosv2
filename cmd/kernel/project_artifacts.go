@@ -70,7 +70,7 @@ func artifactManifestPath(root, projectID string) string {
 // out/ is never scanned: a stray file there has no evidence and no hash.
 func publishProjectArtifacts(root, projectID string, projects []project) (ArtifactManifest, error) {
 	manifest := ArtifactManifest{Version: artifactManifestVersion, ProjectID: projectID,
-		GeneratedAt: time.Now().UTC()}
+		GeneratedAt: time.Now().UTC(), Entries: []ArtifactEntry{}}
 	state := projectStateDir(root, projectID)
 	if err := os.MkdirAll(state, 0o755); err != nil {
 		return manifest, fmt.Errorf("create project state: %w", err)
@@ -128,11 +128,19 @@ func publishProjectArtifacts(root, projectID string, projects []project) (Artifa
 // the serve process can both refresh the same project; a flock prevents one
 // atomic swap from clobbering the other.
 func lockProjectPublish(state string) (func(), error) {
+	return lockProject(state, syscall.LOCK_EX)
+}
+
+func lockProjectRead(state string) (func(), error) {
+	return lockProject(state, syscall.LOCK_SH)
+}
+
+func lockProject(state string, how int) (func(), error) {
 	file, err := os.OpenFile(filepath.Join(state, ".publish.lock"), os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("open publish lock: %w", err)
 	}
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+	if err := syscall.Flock(int(file.Fd()), how); err != nil {
 		file.Close()
 		return nil, fmt.Errorf("lock publish: %w", err)
 	}
@@ -143,8 +151,15 @@ func lockProjectPublish(state string) (func(), error) {
 }
 
 func publishableArtifacts(p project, staging string, total *int64, seen map[string]string) ([]ArtifactEntry, string, error) {
+	if err := cleanPathSegment(p.Obj.ID); err != nil {
+		return nil, "", fmt.Errorf("objective id: %w", err)
+	}
 	now := time.Now().UTC()
 	deliveryPath := filepath.Join(p.Dir, "delivery.json")
+	info, err := os.Lstat(deliveryPath)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, "completed objective has no regular delivery.json", nil
+	}
 	raw, err := os.ReadFile(deliveryPath)
 	if err != nil {
 		return nil, "completed objective has no readable delivery.json", nil
@@ -351,14 +366,25 @@ func seedProjectArtifacts(dir string) error {
 	}
 	manifest, err := readProjectManifest(root, meta.ID)
 	if err != nil {
+		// A missing or invalid manifest means no trusted evidence. Clear any
+		// legacy copy rather than letting stale files masquerade as published
+		// artifacts.
+		_ = os.RemoveAll(filepath.Join(dir, "repo", "project-artifacts"))
 		if os.IsNotExist(err) {
-			// No manifest means no trusted evidence. Clear any legacy copy rather
-			// than letting stale files masquerade as published artifacts.
-			_ = os.RemoveAll(filepath.Join(dir, "repo", "project-artifacts"))
 			return nil
 		}
 		return fmt.Errorf("read shared artifact manifest: %w", err)
 	}
+	state := projectStateDir(root, meta.ID)
+	if _, err := os.Stat(state); err != nil {
+		_ = os.RemoveAll(filepath.Join(dir, "repo", "project-artifacts"))
+		return nil
+	}
+	unlock, err := lockProjectRead(state)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	source := sharedArtifactDir(root, meta.ID)
 	dest := filepath.Join(dir, "repo", "project-artifacts")
 	// Verify everything before clearing the old seed. A tampered entry must not
@@ -380,6 +406,13 @@ func seedProjectArtifacts(dir string) error {
 			return err
 		}
 		from := filepath.Join(source, entry.ObjectiveID, rel)
+		info, err := os.Lstat(from)
+		if err != nil {
+			return fmt.Errorf("shared artifact %s/%s: %w", entry.ObjectiveID, rel, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("shared artifact %s/%s is not a regular file", entry.ObjectiveID, rel)
+		}
 		raw, err := os.ReadFile(from)
 		if err != nil {
 			return fmt.Errorf("shared artifact %s/%s: %w", entry.ObjectiveID, rel, err)

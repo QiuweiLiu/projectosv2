@@ -98,8 +98,14 @@ func TestMetricsRunningThenSettled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Accepted != 1 || m.FirstPass != 1 || m.ActiveRuns != 0 || m.FinishedAt == "" {
+	if m.Accepted != 1 || m.FirstPass != 1 || m.ActiveRuns != 0 {
 		t.Fatalf("settled metrics = %+v", m)
+	}
+	if m.FinishedAt != "" {
+		t.Fatalf("an active objective must not have an objective FinishedAt: %+v", m)
+	}
+	if m.LastRunFinishedAt == "" {
+		t.Fatalf("last run finish should still be visible: %+v", m)
 	}
 }
 
@@ -323,5 +329,29 @@ func TestMetricsCountsRecoveryEvents(t *testing.T) {
 	}
 	if m.AutoRecoveries != 1 || m.ManualRecoveries != 1 {
 		t.Fatalf("recoveries = %+v", m)
+	}
+}
+
+func TestRequeueBlockedHonorsExistingAttemptAllowance(t *testing.T) {
+	st := openMetricsStore(t)
+	createDraftObjective(t, st)
+	if err := st.CreateTask(domain.Task{ID: "T1", Validator: "ok", ObjectiveID: "obj-1",
+		PlanVersion: 1, MaxAttempts: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := st.Claim("T1", "r1", "fake"); err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	if _, err := st.SettleRun(Settlement{RunID: "r1", RunStatus: domain.RunSucceeded,
+		Note: "review: blocking finding", AllowRetry: false}); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := st.RequeueBlocked("T1", "recovery", 3)
+	if err != nil || !ok {
+		t.Fatalf("requeue = %v %v", ok, err)
+	}
+	task, _, _ := st.Get("T1")
+	if task.Status != domain.TaskPending || task.MaxAttempts != 3 {
+		t.Fatalf("task = %+v", task)
 	}
 }

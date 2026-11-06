@@ -468,6 +468,9 @@ func goalRun(args []string) int {
 	if *maxReplans > replan.MaxReplans {
 		*maxReplans = replan.MaxReplans
 	}
+	if *maxRecoveries < 0 {
+		*maxRecoveries = 0
+	}
 	if strings.TrimSpace(*dir) == "" {
 		fmt.Fprintln(os.Stderr, "run requires --dir")
 		return exitError
@@ -737,12 +740,16 @@ func goalRun(args []string) int {
 			}
 			switch decision.Action {
 			case "retry":
+				count, cerr := recovery.Increment(st)
+				if cerr != nil {
+					fmt.Fprintln(os.Stderr, "recovery budget:", cerr)
+					return exitError
+				}
 				ok, rerr := st.RequeueBlocked(domain.TaskID(decision.TaskID), "recovery: "+decision.Reason, 3)
 				if rerr != nil || !ok {
 					fmt.Fprintf(os.Stderr, "recovery requeue %s: ok=%v err=%v\n", decision.TaskID, ok, rerr)
 					break
 				}
-				count, _ := recovery.Increment(st)
 				_ = recovery.ClearPending(st)
 				_ = st.AppendEvent(domain.TaskID(decision.TaskID), "recovery_retry",
 					fmt.Sprintf("%s (count %d/%d)", decision.Reason, count, *maxRecoveries))
@@ -1779,7 +1786,11 @@ func goalRecover(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return exitError
 	}
-	st, err := openGoalStore(*dir)
+	open := openGoalStoreRead
+	if *approve {
+		open = openGoalStore
+	}
+	st, err := open(*dir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "store:", err)
 		return exitError
@@ -1840,12 +1851,24 @@ func goalRecover(args []string) int {
 		fmt.Fprintln(os.Stderr, "recovery is not allowed:", reason)
 		return exitBlocked
 	}
+	if hasPending && pending.Category == "unknown_execution_state" && strings.TrimSpace(*taskOverride) == "" {
+		fmt.Fprintln(os.Stderr, "unknown outcome requires explicit --task after checking side effects")
+		return exitBlocked
+	}
+	if decision.Action == "replan" && strings.TrimSpace(*taskOverride) == "" {
+		fmt.Fprintln(os.Stderr, "this failure needs a bounded replan, not a direct requeue")
+		return exitBlocked
+	}
+	count, cerr := recovery.Increment(st)
+	if cerr != nil {
+		fmt.Fprintln(os.Stderr, "recovery budget:", cerr)
+		return exitError
+	}
 	ok, err = st.RequeueBlocked(domain.TaskID(taskID), "recovery approved: "+reason, 3)
 	if err != nil || !ok {
 		fmt.Fprintf(os.Stderr, "requeue %s: ok=%v err=%v\n", taskID, ok, err)
 		return exitBlocked
 	}
-	count, _ := recovery.Increment(st)
 	if err := recovery.ClearPending(st); err != nil {
 		fmt.Fprintln(os.Stderr, "clear recovery pending:", err)
 	}

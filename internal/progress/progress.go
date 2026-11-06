@@ -125,15 +125,18 @@ func AssessWithBudget(st *store.Store, obj goal.Objective, needsApproval bool, m
 	}
 	if failure != nil {
 		report.RecoveryAvailable = failure.RequiresApproval || (failure.Recoverable && report.RecoveryCount < maxRecoveries)
-		if failure.Recoverable {
-			for _, task := range tasks {
-				if string(task.ID) == failure.TaskID && task.Attempts >= 3 {
-					report.RecoveryAvailable = false
-				}
+		for _, task := range tasks {
+			if string(task.ID) == failure.TaskID && task.Attempts >= 3 {
+				report.RecoveryAvailable = false
 			}
 		}
 	}
 	report.State, report.Next = nextState(obj.Status, hasPlan, report)
+	if failure != nil {
+		// SuggestedAction must be executable in the current state. A diagnosis
+		// may say "retry" while the budget is exhausted; Next says "inspect".
+		report.SuggestedAction = report.Next
+	}
 	return report, nil
 }
 
@@ -248,7 +251,8 @@ func diagnoseTask(st *store.Store, task domain.Task) (*Failure, error) {
 		f.Category = "dependency_failure"
 		f.Action = "replan"
 	case strings.Contains(text, "start:") || strings.Contains(text, "prompt:") ||
-		strings.Contains(text, "collect:") || strings.Contains(text, "observe error"):
+		strings.Contains(text, "collect:") || strings.Contains(text, "observe error") ||
+		strings.Contains(text, "timeout"):
 		f.Category = "environment_failure"
 		f.Action = "inspect"
 	case strings.Contains(text, "interrupted") || strings.Contains(text, "unknown"):
@@ -305,7 +309,10 @@ func nextState(status goal.Status, hasPlan bool, r Report) (State, string) {
 			return StateRecoverableFailure, r.Failure.Action
 		}
 		if r.Failure != nil && r.Failure.RequiresApproval {
-			return StateManualIntervention, "approve"
+			if r.RecoveryAvailable {
+				return StateManualIntervention, "approve"
+			}
+			return StateManualIntervention, "inspect"
 		}
 		if r.Failure != nil && r.Failure.Category != "unknown" {
 			return StateManualIntervention, "inspect"
@@ -323,7 +330,10 @@ func nextState(status goal.Status, hasPlan bool, r Report) (State, string) {
 				return StateRecoverableFailure, r.Failure.Action
 			}
 			if r.Failure != nil && r.Failure.RequiresApproval {
-				return StateNeedsApproval, "approve"
+				if r.RecoveryAvailable {
+					return StateNeedsApproval, "approve"
+				}
+				return StateManualIntervention, "inspect"
 			}
 			if r.Failure != nil && (r.Failure.Category == "unknown_execution_state" ||
 				r.Failure.Category == "environment_failure" || r.Failure.Category == "unknown") {
@@ -331,8 +341,13 @@ func nextState(status goal.Status, hasPlan bool, r Report) (State, string) {
 			}
 			return StateBlocked, "resolve_blocker"
 		}
-		if r.Ready > 0 || (r.Accepted > 0 && r.Pending > 0) {
+		if r.Ready > 0 {
 			return StateReady, "run"
+		}
+		if r.Pending > 0 {
+			// No READY task while pending work remains means dependencies are not
+			// satisfied yet (or form a cycle). "run" would be a false promise.
+			return StateBlocked, "resolve_blocker"
 		}
 		if r.Pending == 0 && r.Accepted > 0 {
 			// Every task is accepted; the scheduler still has to run objective

@@ -27,7 +27,7 @@ Status: p5（可信产物/Progress/有界恢复/Evidence Context/Cockpit）
 - 任务侧保留 P2：Workspace、多目标、审批、diff、`--session`、work prune、token 实测。
 
 ## Verified
-- 266 项 Go 测试 + `-race` + `vet` 全绿。
+- 272 项 Go 测试 + `-race` + `vet` 全绿。
 - 真实 OpenCode：3 轮聊天、SSE delta、工具写文件 + permission once 批准；
   serve 重启后历史与 Session 恢复；`/api/objectives` 始终为空。
 - 真实托管目标：planner → worker → reviewer → acceptance → **objective acceptance**

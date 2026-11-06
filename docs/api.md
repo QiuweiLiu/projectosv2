@@ -32,7 +32,7 @@ kernel serve --dir D --stop                 # 停掉 HTTP 服务
 | GET | `/api/tasks/{id}?objective=…` | 单个任务的 evidence / review / 错误；若已有中文解释则带 `explanation` |
 | GET | `/api/events?objective=…&after=N&limit=K` | 事件页，返回 `{events, next}`；用 `next` 续传，不重复 |
 | GET | `/api/objectives` | 聚合 Workspace 内全部目标 + 任务计数 |
-| GET | `/api/objectives/{id}` | 目标详情：当前计划、任务行、审批原因、交付状态、是否请求取消 |
+| GET | `/api/objectives/{id}` | 目标详情：当前计划、任务行、审批原因、交付状态、取消请求、`sharedArtifacts` Manifest 条目 |
 | GET | `/api/diff?objective=…&task=…` | 最新尝试 vs 上次交付/上一尝试的文本 diff |
 | GET | `/api/models` | 各角色模型设置 + 缓存的模型列表 |
 | GET | `/api/report?objective=…` | 中文汇报（模型版优先）+ 成果文件列表 |
@@ -126,8 +126,9 @@ Goal Handoff 的 `confirm` 只创建 Objective 并调用 Planner 生成计划；
 acceptance 与 reviewer 是两次独立会话，结果都写 `reviews` 表（kind=`acceptance`），
 同版本各限一次。`--acceptance=false` 可关闭。
 
-Metrics 区分累计 Run 耗时和 Objective 墙钟耗时；存在 active Run 时 `finishedAt` 为空，
-并返回 `activeRuns`。Token 按 planner/worker/reviewer/acceptance/objective 分列，真实值与
+Metrics 区分累计 Run 耗时和 Objective 墙钟耗时；`finishedAt` 表示 Objective 终态结束时间，
+active/paused/planned 等未结束目标为空；最后一次 Run 的结束时间单独放在
+`lastRunFinishedAt`，并返回 `activeRuns`。Token 按 planner/worker/reviewer/acceptance/objective 分列，真实值与
 `usageEstimated` 分开；空 Objective、未执行计划、失败/取消 Run 均返回稳定结构。
 `firstPass`/`acceptedAfterRetry`、`recoveryCount`、`autoRecoveries`/`manualRecoveries` 用于评估恢复效果；
 planner/worker/reviewer/acceptance/objective token 分列，避免重复计算。

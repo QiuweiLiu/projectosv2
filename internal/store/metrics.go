@@ -189,6 +189,12 @@ func (s *Store) Metrics() (Metrics, error) {
 	}
 	if err == nil {
 		m.ObjectiveStatus = status
+		// FinishedAt is the objective end, not merely the last run end. An
+		// active/failed-but-recoverable objective still has an open lifecycle;
+		// LastRunFinishedAt remains available for its last completed attempt.
+		if status != "completed" && status != "failed" && status != "cancelled" {
+			m.FinishedAt = ""
+		}
 		start, serr := time.Parse(time.RFC3339Nano, created)
 		end := time.Now().UTC()
 		switch status {

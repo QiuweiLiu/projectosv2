@@ -84,3 +84,59 @@ func TestRecoveryAPIRefusesAndThenRequeuesWithApproval(t *testing.T) {
 		t.Fatalf("task = %+v", task)
 	}
 }
+
+func TestRecoveryAPIRequiresExplicitTaskForUnknownOutcome(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "projects", "obj-1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeProjectMeta(dir, defaultProjectID); err != nil {
+		t.Fatal(err)
+	}
+	st := seedGoal(t, dir)
+	if _, ok, err := st.Claim("T2", "run-2", "fake"); err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	if _, err := st.SettleRun(store.Settlement{RunID: "run-2", RunStatus: domain.RunUnknown,
+		Note: "interrupted: outcome unknown"}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	ws := newWorkspace(root)
+	mux, ctl, err := buildMux(ws, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	post := func(body string) int {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/objectives/obj-1/recover",
+			strings.NewReader(body))
+		req.Header.Set("X-Kernel-Token", ctl.token)
+		req.Header.Set("Content-Type", "application/json")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	if code := post(`{"approve":true}`); code != http.StatusConflict {
+		t.Fatalf("unknown without task = %d, want 409", code)
+	}
+	if code := post(`{"approve":true,"task":"T2"}`); code != http.StatusOK {
+		t.Fatalf("unknown with task = %d, want 200", code)
+	}
+	ro, err := store.OpenReadOnly(filepath.Join(dir, "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ro.Close()
+	task, _, _ := ro.Get("T2")
+	if task.Status != domain.TaskPending {
+		t.Fatalf("T2 = %s, want pending", task.Status)
+	}
+}

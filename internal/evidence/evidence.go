@@ -160,38 +160,57 @@ func Render(b Bundle) string {
 		case TrustUserDecision:
 			fmt.Fprintf(&out, "- USER DECISION: %s\n", entry.Content)
 		case TrustVerified:
-			fmt.Fprintf(&out, "- VERIFIED artifact %s/%s", entry.ObjectiveID, entry.ArtifactPath)
+			if entry.Kind == KindObjective {
+				fmt.Fprintf(&out, "- COMPLETED objective %s: %s\n", oneLine(entry.ObjectiveID), oneLine(entry.Title))
+				continue
+			}
+			fmt.Fprintf(&out, "- VERIFIED artifact %s/%s", oneLine(entry.ObjectiveID), oneLine(entry.ArtifactPath))
 			if entry.TaskID != "" {
-				fmt.Fprintf(&out, " task=%s", entry.TaskID)
+				fmt.Fprintf(&out, " task=%s", oneLine(entry.TaskID))
 			}
 			if entry.Version != "" {
-				fmt.Fprintf(&out, " version=%s", entry.Version)
+				fmt.Fprintf(&out, " version=%s", oneLine(entry.Version))
 			}
 			if entry.ContentHash != "" {
 				fmt.Fprintf(&out, " sha256=%s", shortHash(entry.ContentHash))
 			}
 			if entry.SourcePath != "" {
-				fmt.Fprintf(&out, " source=%s", entry.SourcePath)
+				fmt.Fprintf(&out, " source=%s", oneLine(entry.SourcePath))
+			}
+			if entry.ReviewStatus != "" && entry.ReviewStatus != "none" {
+				fmt.Fprintf(&out, " review=%s", entry.ReviewStatus)
 			}
 			out.WriteString("\n")
 			if entry.Content != "" {
+				// An artifact must not be able to close the data block and turn
+				// the rest of its body into apparent instructions.
+				content := strings.ReplaceAll(entry.Content, "EVIDENCE>>>", "EVIDENCE_ESCAPED>>>")
+				content = strings.ReplaceAll(content, "<<<EVIDENCE", "<<<EVIDENCE_ESCAPED")
 				out.WriteString("<<<EVIDENCE\n")
-				out.WriteString(entry.Content)
-				if !strings.HasSuffix(entry.Content, "\n") {
+				out.WriteString(content)
+				if !strings.HasSuffix(content, "\n") {
 					out.WriteString("\n")
 				}
 				out.WriteString("EVIDENCE>>>\n")
 			}
 		case TrustInProgress:
-			fmt.Fprintf(&out, "- IN PROGRESS: %s [%s] %s\n", entry.ObjectiveID, entry.Status, entry.Title)
+			fmt.Fprintf(&out, "- IN PROGRESS: %s [%s] %s\n", entry.ObjectiveID, oneLine(entry.Status), oneLine(entry.Title))
 		case TrustUnverified:
-			fmt.Fprintf(&out, "- UNVERIFIED (not a project fact): %s [%s] %s\n", entry.ObjectiveID, entry.Status, entry.Title)
+			fmt.Fprintf(&out, "- UNVERIFIED (not a project fact): %s [%s] %s\n", entry.ObjectiveID, oneLine(entry.Status), oneLine(entry.Title))
 		}
 	}
 	if b.Truncated {
 		out.WriteString("- ... more evidence omitted by the context budget\n")
 	}
 	return out.String()
+}
+
+func oneLine(text string) string {
+	text = strings.ReplaceAll(text, "\r", " ")
+	text = strings.ReplaceAll(text, "\n", " ")
+	text = strings.ReplaceAll(text, "EVIDENCE>>>", "EVIDENCE_ESCAPED>>>")
+	text = strings.ReplaceAll(text, "<<<EVIDENCE", "<<<EVIDENCE_ESCAPED")
+	return strings.TrimSpace(text)
 }
 
 func queryTokens(query string) []string {

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"projectos/kernel/internal/conversation"
 )
@@ -198,13 +199,15 @@ func cleanList(in []string) []string {
 	return out
 }
 
+var chatMetaPhrases = []string{
+	"只回复", "不要调用工具", "不要使用工具", "不要使用任何工具",
+	"reply only", "do not call tool", "do not use tool", "do not use any other tool",
+	"do not call any tool",
+}
+
 func isChatMeta(s string) bool {
 	lower := strings.ToLower(s)
-	for _, phrase := range []string{
-		"只回复", "不要调用工具", "不要使用工具", "不要使用任何工具",
-		"reply only", "do not call tool", "do not use tool", "do not use any other tool",
-		"do not call any tool",
-	} {
+	for _, phrase := range chatMetaPhrases {
 		if strings.Contains(lower, strings.ToLower(phrase)) {
 			return true
 		}
@@ -217,15 +220,76 @@ func cleanGoal(goal string) string {
 	parts := strings.Split(goal, "；")
 	kept := parts[:0]
 	for _, part := range parts {
-		if !isChatMeta(part) {
-			kept = append(kept, part)
+		if cleaned := stripChatMetaClause(part); cleaned != "" {
+			kept = append(kept, cleaned)
 		}
 	}
-	goal = strings.TrimSpace(strings.Join(kept, "；"))
-	if goal == "" {
-		return strings.TrimSpace(goal)
+	return strings.TrimSpace(strings.Join(kept, "；"))
+}
+
+// stripChatMetaClause removes a chat-control clause embedded in an otherwise
+// valid English sentence. It stops at sentence/clause boundaries so it cannot
+// erase the user's actual request.
+func stripChatMetaClause(text string) string {
+	for {
+		lower := strings.ToLower(text)
+		index, phraseLen := -1, 0
+		for _, phrase := range chatMetaPhrases {
+			if i := strings.Index(lower, strings.ToLower(phrase)); i >= 0 && (index < 0 || i < index) {
+				index, phraseLen = i, len(phrase)
+			}
+		}
+		if index < 0 {
+			return strings.TrimSpace(text)
+		}
+		start := index
+		for start > 0 && !clauseBoundaryBefore(text, start) {
+			start--
+		}
+		end := index + phraseLen
+		for end < len(text) && !clauseBoundaryAfter(text, end) {
+			end++
+		}
+		if end < len(text) {
+			_, size := utf8.DecodeRuneInString(text[end:])
+			if size <= 0 {
+				size = 1
+			}
+			end += size
+		}
+		if end > len(text) {
+			end = len(text)
+		}
+		if start > end {
+			start = end
+		}
+		text = strings.TrimSpace(text[:start] + " " + text[end:])
 	}
-	return goal
+}
+
+func clauseBoundaryBefore(text string, i int) bool {
+	if i <= 0 {
+		return true
+	}
+	r, _ := utf8.DecodeLastRuneInString(text[:i])
+	return isClauseBoundary(r)
+}
+
+func clauseBoundaryAfter(text string, i int) bool {
+	if i >= len(text) {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(text[i:])
+	return isClauseBoundary(r)
+}
+
+func isClauseBoundary(r rune) bool {
+	switch r {
+	case '.', ';', '\n', '。', '；', ',', '，':
+		return true
+	default:
+		return false
+	}
 }
 
 func handoffVersion(msgs []conversation.Message, projectContext string) string {

@@ -1309,9 +1309,9 @@ func (s *Store) RequeueBlocked(taskID domain.TaskID, reason string, attemptCap i
 	}
 	defer tx.Rollback()
 	var status string
-	var max int
-	if err := tx.QueryRow(`SELECT status, max_attempts FROM tasks WHERE id=?`, string(taskID)).
-		Scan(&status, &max); err != nil {
+	var max, attempts int
+	if err := tx.QueryRow(`SELECT status, max_attempts, attempts FROM tasks WHERE id=?`, string(taskID)).
+		Scan(&status, &max, &attempts); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, fmt.Errorf("unknown task %s", taskID)
 		}
@@ -1320,13 +1320,22 @@ func (s *Store) RequeueBlocked(taskID domain.TaskID, reason string, attemptCap i
 	if status != string(domain.TaskBlocked) && status != string(domain.TaskRejected) {
 		return false, nil
 	}
-	if max >= attemptCap {
+	if attempts >= attemptCap {
 		return false, nil
+	}
+	// Preserve a plan's larger attempt allowance; only grow the cap when the
+	// current cap would immediately re-block the requeued task.
+	newMax := max
+	if newMax <= attempts {
+		newMax = attempts + 1
+	}
+	if newMax > attemptCap {
+		newMax = attemptCap
 	}
 	res, err := tx.Exec(`UPDATE tasks SET status=?, max_attempts=?,
 		last_error=CASE WHEN last_error='' THEN ? ELSE last_error END
 		WHERE id=? AND status IN (?, ?)`,
-		string(domain.TaskPending), max+1, reason, string(taskID),
+		string(domain.TaskPending), newMax, reason, string(taskID),
 		string(domain.TaskBlocked), string(domain.TaskRejected))
 	if err != nil {
 		return false, err

@@ -209,6 +209,11 @@ func (s *Store) ConfirmPlan(objectiveID string, version int) error {
 }
 
 func (s *Store) GetPlan(objectiveID string, version int) (PlanRecord, bool, error) {
+	if ok, err := s.hasTable("plans"); err != nil {
+		return PlanRecord{}, false, err
+	} else if !ok {
+		return PlanRecord{}, false, nil
+	}
 	var p PlanRecord
 	var raw, created string
 	var confirmed sql.NullString
@@ -238,6 +243,11 @@ func (s *Store) GetPlan(objectiveID string, version int) (PlanRecord, bool, erro
 }
 
 func (s *Store) LatestPlan(objectiveID string) (PlanRecord, bool, error) {
+	if ok, err := s.hasTable("plans"); err != nil {
+		return PlanRecord{}, false, err
+	} else if !ok {
+		return PlanRecord{}, false, nil
+	}
 	var version sql.NullInt64
 	if err := s.db.QueryRow(`SELECT MAX(version) FROM plans WHERE objective_id=?`, objectiveID).Scan(&version); err != nil {
 		return PlanRecord{}, false, err

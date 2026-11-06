@@ -3,6 +3,7 @@ package main
 import (
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"projectos/kernel/internal/domain"
 	"projectos/kernel/internal/evidence"
@@ -88,19 +89,21 @@ func (w *workspace) BuildEvidenceIndex(id string) (evidence.Index, error) {
 					break
 				}
 			}
-			key := versionKey{p.Obj.ID, task.ArtifactPath}
+			visible := content
+			if !utf8.ValidString(visible) {
+				visible = "(binary artifact; content omitted)"
+			}
 			entry := evidence.Entry{
 				ProjectID: id, ObjectiveID: p.Obj.ID, TaskID: string(task.ID), Kind: evidence.KindArtifact,
 				Trust: evidence.TrustVerified, ArtifactPath: task.ArtifactPath,
 				Version: ev.ArtifactVersion, ContentHash: ev.Digest,
 				SourcePath: "project-artifacts/" + p.Obj.ID + "/" + task.ArtifactPath,
-				Status:     "accepted", ReviewStatus: reviewStatus, Content: clipText(content, 1024),
+				Status:     "accepted", ReviewStatus: reviewStatus, Content: clipText(visible, 1024),
 				Keywords: task.Prompt, UpdatedAt: ev.At,
 			}
 			if entry.UpdatedAt.IsZero() {
 				entry.UpdatedAt = p.Obj.UpdatedAt
 			}
-			_ = key
 			artifacts = append(artifacts, entry)
 		}
 		if p.Obj.Status == goal.StatusFailed {
@@ -169,5 +172,9 @@ func clipText(text string, max int) string {
 	if len(text) <= max {
 		return text
 	}
-	return text[:max] + "\n... (truncated)"
+	cut := max
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut] + "\n... (truncated)"
 }
