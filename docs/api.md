@@ -93,7 +93,7 @@ D/                           # Workspace 根
 |---|---|---|
 | GET | `/api/conversations` | 对话列表 + 最后一条消息 |
 | POST | `/api/conversations` | `{title,projectId,objectiveId,model}` 创建对话；可关联 Objective 以使用其目录 |
-| GET | `/api/conversations/{id}` | 对话 + 历史消息（分页上限 200） |
+| GET | `/api/conversations/{id}` | 对话 + 历史消息（分页上限 500） |
 | POST | `/api/conversations/{id}/messages` | `{text}` 发送；返回 202，回复通过 SSE 到达 |
 | POST | `/api/conversations/{id}/stop` | 中断当前 OpenCode 执行 |
 | POST | `/api/conversations/{id}/permissions/{requestId}` | `{decision: once|always|reject}` 批准工具调用 |
@@ -124,6 +124,9 @@ Goal Handoff 的 `confirm` 只创建 Objective 并调用 Planner 生成计划；
 
 acceptance 与 reviewer 是两次独立会话，结果都写 `reviews` 表（kind=`acceptance`），
 同版本各限一次。`--acceptance=false` 可关闭。
+
+provider 的 429/overloaded/ECONNRESET/连接中断最多重试 3 次（2s、4s 退避）；permanent
+错误、输出不可解析、session 超时不重试，仍按 fail-closed 记录阻断。
 
 ## 7. 继续改进（continue）
 

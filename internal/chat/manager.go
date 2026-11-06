@@ -549,13 +549,30 @@ func (m *Manager) Sync(ctx context.Context, c conversation.Conversation) error {
 	if srv == nil {
 		return nil
 	}
-	msgs, err := srv.Messages(ctx, c.SessionID, 200)
-	if err != nil {
-		return err
+	var msgs []opencodeserver.Message
+	cursor := ""
+	for page := 0; page < 10; page++ {
+		result, err := srv.MessagesPage(ctx, c.SessionID, 200, cursor, "asc")
+		if err != nil {
+			return err
+		}
+		msgs = append(msgs, result.Data...)
+		if result.Cursor.Next == "" || len(result.Data) == 0 {
+			break
+		}
+		cursor = result.Cursor.Next
+		if len(msgs) >= 2000 {
+			break
+		}
 	}
-	// The provider returns newest first; import oldest first so ordering and
-	// pagination remain stable.
+	// Import oldest first so ordering and pagination remain stable.
 	sort.SliceStable(msgs, func(i, j int) bool { return msgs[i].Time.Created < msgs[j].Time.Created })
+	if c.Status == conversation.StatusRunning && len(msgs) > 0 {
+		last := msgs[len(msgs)-1]
+		if last.Type == "idle" {
+			m.setIdle(c.ID, conversation.StatusIdle, "")
+		}
+	}
 	for _, msg := range msgs {
 		role, text := "", ""
 		switch msg.Type {

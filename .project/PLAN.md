@@ -15,7 +15,7 @@ Project Context 注入；P3.3-P3.5 部分完成。
 - 关闭/重开桌面后历史、Session、Objective/Task 状态一致。
 - 工具调用默认 ask，批准只对本次请求生效。
 - `runNow` 不绕过确认；Objective acceptance 阻断时不交付。
-- 现有 CLI、Workspace、213 测试保持兼容。
+- 现有 CLI、Workspace、222 测试保持兼容。
 
 ## Not now
 Windows/Linux、逐工具托管任务审批、Project 级复杂调度、多设备同步、日志轮转。

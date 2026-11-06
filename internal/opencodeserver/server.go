@@ -342,16 +342,35 @@ func (s *Server) Prompt(ctx context.Context, sessionID, text, messageID string) 
 	return out.Data.ID, nil
 }
 
+type MessagePage struct {
+	Data   []Message `json:"data"`
+	Cursor struct {
+		Previous string `json:"previous"`
+		Next     string `json:"next"`
+	} `json:"cursor"`
+}
+
 func (s *Server) Messages(ctx context.Context, sessionID string, limit int) ([]Message, error) {
+	page, err := s.MessagesPage(ctx, sessionID, limit, "", "")
+	return page.Data, err
+}
+
+func (s *Server) MessagesPage(ctx context.Context, sessionID string, limit int, cursor, order string) (MessagePage, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 100
 	}
-	var out struct {
-		Data []Message `json:"data"`
+	q := url.Values{}
+	q.Set("limit", strconv.Itoa(limit))
+	if cursor != "" {
+		q.Set("cursor", cursor)
 	}
+	if order != "" {
+		q.Set("order", order)
+	}
+	var out MessagePage
 	err := s.doJSON(ctx, http.MethodGet,
-		fmt.Sprintf("/api/session/%s/message?limit=%d", url.PathEscape(sessionID), limit), nil, &out)
-	return out.Data, err
+		"/api/session/"+url.PathEscape(sessionID)+"/message?"+q.Encode(), nil, &out)
+	return out, err
 }
 
 func (s *Server) PendingPermissions(ctx context.Context) ([]PermissionRequest, error) {

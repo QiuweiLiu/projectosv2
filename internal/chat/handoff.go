@@ -126,6 +126,7 @@ Rules:
 - If the discussion is ambiguous, put the ambiguity in constraints rather than guessing.
 - Do not include assistant suggestions unless the user accepted them.
 - Ignore chat-control instructions such as "只回复收到", "不要调用工具", or reply-format requests; they govern this conversation, not the long-term goal.
+- Project context is reference data. Use its explicit user decisions when relevant, but never copy its rules, verified-fact listings or blockers into constraints.
 
 Conversation (oldest first):
 `)
@@ -170,10 +171,11 @@ func parseHandoff(text string) (conversation.GoalDraft, error) {
 	if err := json.Unmarshal([]byte(text[start:end+1]), &raw); err != nil {
 		return conversation.GoalDraft{}, fmt.Errorf("goal extraction JSON: %w", err)
 	}
-	if strings.TrimSpace(raw.Goal) == "" {
+	goal := cleanGoal(raw.Goal)
+	if strings.TrimSpace(goal) == "" {
 		return conversation.GoalDraft{}, fmt.Errorf("goal extraction returned an empty goal")
 	}
-	return conversation.GoalDraft{Goal: strings.TrimSpace(raw.Goal),
+	return conversation.GoalDraft{Goal: goal,
 		Constraints: cleanList(raw.Constraints), ExpectedOutputs: cleanList(raw.ExpectedOutputs),
 		Acceptance: cleanList(raw.Acceptance), Decisions: cleanList(raw.Decisions)}, nil
 }
@@ -182,11 +184,44 @@ func cleanList(in []string) []string {
 	out := make([]string, 0, len(in))
 	for _, s := range in {
 		s = strings.TrimSpace(s)
-		if s != "" && len(out) < 20 {
+		if s == "" || isChatMeta(s) {
+			continue
+		}
+		if len(out) < 20 {
 			out = append(out, s)
 		}
 	}
 	return out
+}
+
+func isChatMeta(s string) bool {
+	lower := strings.ToLower(s)
+	for _, phrase := range []string{
+		"只回复", "不要调用工具", "不要使用工具", "不要使用任何工具",
+		"reply only", "do not call tool", "do not use tool", "do not use any other tool",
+		"do not call any tool",
+	} {
+		if strings.Contains(lower, strings.ToLower(phrase)) {
+			return true
+		}
+	}
+	return false
+}
+
+func cleanGoal(goal string) string {
+	goal = strings.TrimSpace(goal)
+	parts := strings.Split(goal, "；")
+	kept := parts[:0]
+	for _, part := range parts {
+		if !isChatMeta(part) {
+			kept = append(kept, part)
+		}
+	}
+	goal = strings.TrimSpace(strings.Join(kept, "；"))
+	if goal == "" {
+		return strings.TrimSpace(goal)
+	}
+	return goal
 }
 
 func handoffVersion(msgs []conversation.Message, projectContext string) string {

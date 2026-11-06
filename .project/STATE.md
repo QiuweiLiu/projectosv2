@@ -6,7 +6,7 @@ P4 增加计划机器检查进 prompt、权限补拉、跨 Objective 共享产�
 Objective metrics。P3.3 智能干预/P3.5 重故障注入仍部分。Kernel 仍是唯一 Task/Run 权威。
 
 ## Verified
-- **213 项测试 + `-race` + `vet` 全绿**；真实运行后无残留进程。
+- **222 项测试 + `-race` + `vet` 全绿**；真实运行后无残留进程。
 - **场景 A**：待办应用 3 任务，`node test.js` 验收，`out/` 组装后 11–14 项测试通过。
 - **场景 B**：sales.csv → summarize.js → summary.md，总额 60（一次通过，0 阻断）。
 - **场景 C**：真实模型重规划（T1 失败 → T1-fix → 完成）。
@@ -27,6 +27,13 @@ Objective metrics。P3.3 智能干预/P3.5 重故障注入仍部分。Kernel 仍
   聊天不产生 Objective。SSE 事件 `after`/`Last-Event-ID` 可重放。
 - **M3 最小**：Project catalog + objective 的 `project.json` 归属；聊天可按项目过滤；
   项目级 `project-state/<id>/.project/` 快照（目标/成果/阻塞/决策），有 8KB 上限。
+- **P4 真实证据**：坏计划（未声明 `add_task`）被 CLI 拒绝并给出具体原因，好计划通过；
+  worker 在提示词含机器检查时生成 `app.py: def add_task`；待批准权限在 serve 重启后
+  被重新拉取；跨 Objective worker 读取共享 `notes.txt` 并写出 `report.txt`；notes 目标
+  `progress=done`、metrics 1 task/1 accepted/3 reviews/21481 prompt tokens；真实
+  Goal Draft 提取丢弃 “Do not use any other tools” 并保留用户约束。
+- **P4 重试边界**：provider 429/overloaded/ECONNRESET 最多 3 次有界退避；permanent
+  error 不重试。fake session 测试通过，真实 429 仍可能耗尽重试后 fail-closed。
 - 真实校验：`/chat` 浏览器发送、流式回复、工具权限、重启恢复；详见 HANDOFF。
 - **CLI 执行器**：`opencode-go/minimax-m3.1-flash` 与 `deepseek-v4.1-flash` 真实跑通 计划 → worker → reviewer →
   acceptance → 交付；崩溃残留进程回收有回归测试。

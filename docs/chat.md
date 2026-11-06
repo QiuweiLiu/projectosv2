@@ -38,6 +38,10 @@ Kernel 启动一个私有的 `opencode serve --hostname 127.0.0.1 --port <free>`
 user/assistant 文本，不导入 reasoning 或工具内部状态。新消息优先按 `remote_id` 匹配，
 旧消息仅在唯一匹配时做一次兼容 adoption。
 
+同步使用 `order=asc` + cursor 分页，最多导入 2000 条，连续同步保持幂等；若远端 session
+已空闲而本地仍是 running，末尾的 `idle` 消息会纠正本地状态。超过 2000 条的长会话只
+保留最早的一批，属于已知边界。
+
 SSE 订阅会分页回放，最多 4096 条；超过上限、事件已被清理或慢消费者导致缓冲区溢出时，
 会显式发送 `event: resync`，前端重读消息而不是静默跳号。
 
@@ -71,4 +75,5 @@ Goal / Constraints / Expected Outputs / Acceptance / Decisions，并保存
 
 - 聊天历史的全文搜索与导出；
 - 多聊天并发上限与跨设备同步；
-- Goal Draft 提取对“只回复收到/不要调用工具”等聊天元指令的过滤依赖模型，需继续观察。
+- Goal Draft 提取在模型输出后按常见“只回复/不要调用工具”句式做确定性过滤；模型仍可能
+  用其他措辞表达聊天控制，必要时继续扩展过滤表。

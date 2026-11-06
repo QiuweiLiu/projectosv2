@@ -115,6 +115,9 @@ func ValidatePlanForKernel(p goal.Plan) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
+	if err := goal.ValidateImplementationChecks(p); err != nil {
+		return err
+	}
 	for _, t := range p.Tasks {
 		if len(t.Validators) == 0 {
 			return fmt.Errorf("task %s has no validator", t.ID)

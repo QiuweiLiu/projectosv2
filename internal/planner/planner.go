@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -41,22 +42,29 @@ func Generate(ctx context.Context, p Planner, req Request, attempts int) (goal.P
 	if attempts <= 0 {
 		attempts = 2
 	}
-	var last error
+	// Keep every attempt error. Overwriting with the last one hides the real
+	// rejection behind an exhausted planner or a provider retry.
+	var errs []error
 	for i := 0; i < attempts; i++ {
 		result, err := p.Plan(ctx, req)
 		if err != nil {
-			last = err
+			errs = append(errs, fmt.Errorf("attempt %d: %w", i+1, err))
 			req.Feedback = "previous attempt failed: " + err.Error()
 			continue
 		}
 		if err := result.Plan.Validate(); err != nil {
-			last = err
+			errs = append(errs, fmt.Errorf("attempt %d: %w", i+1, err))
+			req.Feedback = "previous plan was rejected: " + err.Error()
+			continue
+		}
+		if err := goal.ValidateImplementationChecks(result.Plan); err != nil {
+			errs = append(errs, fmt.Errorf("attempt %d: %w", i+1, err))
 			req.Feedback = "previous plan was rejected: " + err.Error()
 			continue
 		}
 		return result.Plan, result, nil
 	}
-	return goal.Plan{}, Result{}, fmt.Errorf("planner failed after %d attempts: %w", attempts, last)
+	return goal.Plan{}, Result{}, fmt.Errorf("planner failed after %d attempts: %w", attempts, errors.Join(errs...))
 }
 
 // Hash returns a stable identity for a plan.

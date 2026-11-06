@@ -207,3 +207,13 @@ func TestPromptContextInjectedOnce(t *testing.T) {
 		t.Fatalf("second = %q", got)
 	}
 }
+
+func TestParseHandoffDropsChatMetaInstructions(t *testing.T) {
+	draft, err := parseHandoff(`{"goal":"创建 notes.txt；只回复收到，不要调用工具","constraints":["包含 hello","只回复收到","Do not use any other tools"]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(draft.Goal, "只回复") || len(draft.Constraints) != 1 || draft.Constraints[0] != "包含 hello" {
+		t.Fatalf("draft = %+v", draft)
+	}
+}

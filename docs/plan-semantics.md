@@ -53,3 +53,12 @@
 
 Planner 也被要求：除非目标明确点名，不要用 exact/contains 断言内部函数/类名；优先用
 command 验证行为。Prompt 规则不替代校验器，只是减少计划与产物语义错位。
+
+## 计划语义预检
+
+Schema/DAG 校验之后还有一层 `ValidateImplementationChecks`：`exact`/`contains` 如果断言
+`def add_task`、`class Foo` 这类实现符号，而任务目标/范围/验收从未提到该符号，计划会被
+拒绝并反馈给 Planner 重试。它挡的是“worker 无法知道的要求”，不是内容正确性判断。
+
+多次规划失败时错误按 attempt 聚合，不会让“fake planner has no plan left”之类的后续错误
+覆盖第一次真实的 schema/语义拒绝。

@@ -97,3 +97,15 @@ func TestPlannerPromptIncludesBoundedProjectContext(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateKeepsFirstRejectionWhenPlannerExhausted(t *testing.T) {
+	bad := goal.Plan{Tasks: []goal.PlanTask{{ID: "T1", Goal: "x", Artifacts: []string{"a.txt"}, Risk: "low"}}} // no validator
+	fake := &Fake{Plans: []goal.Plan{bad}}
+	_, _, err := Generate(context.Background(), fake, Request{Goal: "g"}, 2)
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	if !strings.Contains(err.Error(), "machine-checkable validator") || !strings.Contains(err.Error(), "no plan left") {
+		t.Fatalf("error hides the first rejection: %v", err)
+	}
+}

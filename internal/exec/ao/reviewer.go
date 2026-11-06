@@ -34,11 +34,65 @@ func (r *Reviewer) Review(ctx context.Context, req exec.ReviewRequest) (engine.R
 	return runSession(ctx, r.backend, req, "reviewer", reviewPrompt(req), r.Timeout, r.Poll)
 }
 
-// runSession is the shared shape of every model judgment: one session, one
-// artifact, JSON findings, fail-closed on anything unexpected.
+// runSession retries only known transient provider failures, with bounded
+// backoff. A malformed answer, a policy error, or an unknown session is never
+// retried; those must stay fail-closed.
 func runSession(ctx context.Context, backend exec.Backend, req exec.ReviewRequest, role, prompt string,
 	timeout, poll time.Duration) (engine.ReviewOutcome, error) {
-	sum := sha256.Sum256([]byte(req.RunID + string(req.Kind)))
+	var total engine.ReviewOutcome
+	for attempt := 0; attempt < 3; attempt++ {
+		out, err := runSessionOnce(ctx, backend, req, role, prompt, timeout, poll, attempt)
+		total.PromptChars += out.PromptChars
+		total.OutputChars += out.OutputChars
+		total.PromptTokens += out.PromptTokens
+		total.OutputTokens += out.OutputTokens
+		total.UsageEstimated = total.UsageEstimated || out.UsageEstimated
+		if err == nil {
+			total.Findings = out.Findings
+			return total, nil
+		}
+		if !transientProviderError(err.Error()) || attempt == 2 {
+			out.PromptChars, out.OutputChars = total.PromptChars, total.OutputChars
+			out.PromptTokens, out.OutputTokens = total.PromptTokens, total.OutputTokens
+			out.UsageEstimated = total.UsageEstimated
+			return out, err
+		}
+		select {
+		case <-ctx.Done():
+			out.PromptChars, out.OutputChars = total.PromptChars, total.OutputChars
+			out.PromptTokens, out.OutputTokens = total.PromptTokens, total.OutputTokens
+			out.UsageEstimated = total.UsageEstimated
+			return out, ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * retryBackoff):
+		}
+	}
+	return total, fmt.Errorf("session retries exhausted")
+}
+
+// retryBackoff is a variable so tests can exercise the retry path without
+// sleeping for real provider backoff.
+var retryBackoff = 2 * time.Second
+
+func transientProviderError(text string) bool {
+	text = strings.ToLower(text)
+	// A session timeout is deliberately not on this list: the model may still be
+	// working, and retrying would triple a five-minute wait without new evidence.
+	for _, needle := range []string{"429", "overloaded", "rate limit", "rate_limit",
+		"econnreset", "transport", "socket", "eof", "temporarily unavailable"} {
+		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// runSessionOnce is the shared shape of every model judgment: one session, one
+// artifact, JSON findings, fail-closed on anything unexpected.
+func runSessionOnce(ctx context.Context, backend exec.Backend, req exec.ReviewRequest, role, prompt string,
+	timeout, poll time.Duration, attempt int) (engine.ReviewOutcome, error) {
+	// A retry must be a new session. Reusing the idempotency key makes AO replay
+	// the failed session instead of asking the provider again.
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s%s-%d", req.RunID, req.Kind, attempt)))
 	start, err := backend.Start(ctx, exec.StartRequest{
 		TaskID:       domain.TaskID(role + "-" + string(req.Task.ID)),
 		Attempt:      1,
@@ -61,8 +115,14 @@ func runSession(ctx context.Context, backend exec.Backend, req exec.ReviewReques
 		}
 		if state.Status != domain.RunRunning {
 			if state.Status != domain.RunSucceeded {
-				err := fmt.Errorf("session ended as %s", state.Status)
-				return engine.ReviewOutcome{Findings: failClosed(role+"_run", err)}, err
+				err := fmt.Errorf("session ended as %s: %s", state.Status, strings.TrimSpace(state.Evidence))
+				out := engine.ReviewOutcome{Findings: failClosed(role+"_run", err)}
+				if collected, cerr := backend.Collect(ctx, start.ExternalID, ""); cerr == nil {
+					out.PromptChars, out.OutputChars = collected.PromptChars, collected.OutputChars
+					out.PromptTokens, out.OutputTokens = collected.PromptTokens, collected.OutputTokens
+					out.UsageEstimated = collected.UsageEstimated
+				}
+				return out, err
 			}
 			break
 		}
