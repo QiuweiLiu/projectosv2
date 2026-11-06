@@ -29,7 +29,7 @@ Status: p3_0_p3_2（验收缓存/消息同步/SSE/Goal Handoff/Project Context�
   → 交付 completed；objective review 记录实测 token。
 - `runNow=true` 实测只到 `planned`，tasks 表 0 条。
 - `/chat` 浏览器发送/流式/项目过滤/工具卡片已验证；桌面 `--check` 通过。
-- 基线 HEAD：`c89a06e`；本轮已提交 `a5393f9` 并 push 到 `origin/main`。
+- 基线 HEAD：`e5cfec4`；P3.0–P3.2 提交 `7fa3b9a`，已 push 到 `origin/main`。
 
 ## Open
 - Goal Draft 合同/来源已保存；聊天元指令过滤依赖模型，需要继续观察。
