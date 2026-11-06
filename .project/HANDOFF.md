@@ -31,7 +31,7 @@ Status: p4_min（机器检查/权限补拉/共享产物/Progress/Metrics）
   → 交付 completed；objective review 记录实测 token。
 - `runNow=true` 实测只到 `planned`，tasks 表 0 条。
 - `/chat` 浏览器发送/流式/项目过滤/工具卡片已验证；桌面 `--check` 通过。
-- 基线 HEAD：`e5cfec4`；P3.0–P3.2 提交 `7fa3b9a`，已 push 到 `origin/main`。
+- 基线 HEAD：`e5cfec4`；P3.0–P3.2 提交 `7fa3b9a`；P4 提交 `dfa913c`，均已 push 到 `origin/main`。
 
 ## Open
 - Goal Draft 合同/来源已保存；聊天元指令过滤依赖模型，需要继续观察。
@@ -43,7 +43,7 @@ Status: p4_min（机器检查/权限补拉/共享产物/Progress/Metrics）
 - Windows/Linux、桌面签名/公证、日志轮转未做。
 
 ## Active
-工作副本：`~/dev/projectosv2`（Git HEAD `c89a06e` + 未提交改动）。
+工作副本：`~/dev/projectosv2`（Git HEAD `dfa913c`，clean）。
 测试服务可能仍在 8801；用 `kernel serve --dir <D> --stop` 关闭。
 旧演示 8787/8789/8790 不是本轮启动。
 
