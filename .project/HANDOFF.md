@@ -33,7 +33,7 @@ Status: p4_min（机器检查/权限补拉/共享产物/Progress/Metrics）
   → 交付 completed；objective review 记录实测 token。
 - `runNow=true` 实测只到 `planned`，tasks 表 0 条。
 - `/chat` 浏览器发送/流式/项目过滤/工具卡片已验证；桌面 `--check` 通过。
-- 基线 HEAD：`e5cfec4`；P3.0–P3.2 提交 `7fa3b9a`；P4 提交 `dfa913c`；P4 修复提交见下一次 push。
+- 基线 HEAD：`e5cfec4`；P3.0–P3.2 提交 `7fa3b9a`；P4 提交 `dfa913c`；P4 修复提交 `345187c`，均已 push 到 `origin/main`。
 - P4 真实验证：计划语义预检（坏计划拒绝/好计划通过）、worker 机器检查、权限重启补拉、
   跨 Objective 共享产物、真实 Handoff 过滤、`order=asc` cursor 分页。
 
@@ -47,8 +47,8 @@ Status: p4_min（机器检查/权限补拉/共享产物/Progress/Metrics）
 - Windows/Linux、桌面签名/公证、日志轮转未做。
 
 ## Active
-工作副本：`~/dev/projectosv2`（P4 修复提交后 clean）。
-测试服务可能仍在 8801；用 `kernel serve --dir <D> --stop` 关闭。
+工作副本：`~/dev/projectosv2`（Git HEAD `345187c`，clean）。
+本轮测试服务已停止；旧演示 8787/8789/8790 不是本轮启动。
 旧演示 8787/8789/8790 不是本轮启动。
 
 ## Next
