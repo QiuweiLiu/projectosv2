@@ -7,7 +7,8 @@
 | 位置 | 内容 | 权威性 |
 |---|---|---|
 | Kernel SQLite | objective / plan / task / run / evidence / review / event | **运行时唯一权威** |
-| `<state-dir>/.project/` | PROJECT.md / STATE.md / HANDOFF.md / snapshot.json | **派生快照**，可随时重建 |
+| `<state-dir>/.project/` | PROJECT.md / STATE.md / HANDOFF.md / snapshot.json | **目标级派生快照**，可随时重建 |
+| `<workspace>/project-state/<project>/.project/` | 项目级 PROJECT/STATE/HANDOFF/DECISIONS/snapshot | **项目级派生快照**，从多个目标库重建 |
 | `delivery.md/json` | 交付报告 | 完成时生成 |
 
 `.project/` 由唯一 writer（`kernel goal export` 或完成时自动）生成，文件头带
@@ -42,6 +43,12 @@ goal resume → matches database
 改库后 resume → "snapshot is stale"
 resume --write → regenerated → matches
 ```
+
+## 项目级上下文
+
+一个 Project 可以包含多个 Objective。项目级 `.project/` 不复制目标运行状态，只汇总：
+目标列表、已验证交付、当前阻塞、显式决策。它由 `GET /api/projects/{id}` /
+`kernel project snapshot` 从目标数据库重建，不能手工当作权威状态。
 
 ## 未实现
 

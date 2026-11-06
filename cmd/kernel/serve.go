@@ -568,13 +568,14 @@ func buildMux(ws *workspace, control bool, chatMgr *chat.Manager) (*http.ServeMu
 				return
 			}
 			var req struct {
-				Name string `json:"name"`
+				Name        string `json:"name"`
+				Description string `json:"description"`
 			}
-			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&req); err != nil {
 				http.Error(w, "bad json", http.StatusBadRequest)
 				return
 			}
-			p, err := ws.CreateProject(req.Name)
+			p, err := ws.CreateProjectWithDescription(req.Name, req.Description)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
@@ -582,6 +583,70 @@ func buildMux(ws *workspace, control bool, chatMgr *chat.Manager) (*http.ServeMu
 			_ = writeJSON(w, p)
 		default:
 			http.Error(w, "GET or POST only", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/projects/", func(w http.ResponseWriter, r *http.Request) {
+		rest := strings.TrimPrefix(r.URL.Path, "/api/projects/")
+		parts := strings.SplitN(rest, "/", 2)
+		if rest == "" || rest == r.URL.Path {
+			http.NotFound(w, r)
+			return
+		}
+		id := parts[0]
+		action := ""
+		if len(parts) == 2 {
+			action = parts[1]
+		}
+		if r.Method == http.MethodGet && action == "" {
+			info, ok, err := ws.FindProject(id)
+			if err != nil || !ok {
+				http.Error(w, "unknown project", http.StatusNotFound)
+				return
+			}
+			snap, err := ws.BuildProjectSnapshot(id)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			_ = writeJSON(w, map[string]any{"project": info, "snapshot": snap})
+			return
+		}
+		if ctl == nil {
+			http.Error(w, "server was started without --control", http.StatusForbidden)
+			return
+		}
+		if !ctl.authorised(r) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case r.Method == http.MethodPost && action == "refresh":
+			snap, err := ws.ProjectSnapshot(id)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			_ = writeJSON(w, snap)
+		case r.Method == http.MethodPost && action == "decisions":
+			var req struct {
+				Text string `json:"text"`
+			}
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&req); err != nil {
+				http.Error(w, "bad json", http.StatusBadRequest)
+				return
+			}
+			if err := ws.appendProjectDecision(id, req.Text); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			snap, err := ws.ProjectSnapshot(id)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			_ = writeJSON(w, snap)
+		default:
+			http.Error(w, "unsupported", http.StatusMethodNotAllowed)
 		}
 	})
 	mux.HandleFunc("/api/objectives", func(w http.ResponseWriter, r *http.Request) {

@@ -108,8 +108,10 @@ Kernel 不包含 Research 术语；`.project/` 仍是人类可读的权威摘要
     `/chat` 批准一次/总是/拒绝；`after`/`Last-Event-ID` 重放。
   - **`/chat` 工作台**：项目/对话、聊天、Objective/Task 三栏；桌面壳默认打开；工具卡片、
     历史恢复、按项目过滤。
-  - **M3 最小**：Project catalog + 目标目录 `project.json` 归属；尚无项目级上下文共享。
-  - 188 项测试 + race + vet；真实聊天、工具权限、重启恢复、Objective acceptance 已验证。
+  - **M3 最小**：Project catalog + 目标目录 `project.json` 归属；
+    `project-state/<id>/.project/` 从目标库重建项目级 PROJECT/STATE/HANDOFF/DECISIONS；
+    快照有 8KB/条目上限，支持 `GET /api/projects/{id}`、refresh、decisions 和 CLI。
+  - 192 项测试 + race + vet；真实聊天、工具权限、重启恢复、Objective acceptance 已验证。
 - 尚未实现：Cockpit 的 Kernel SSE、Windows/Linux 桌面壳、托管任务逐工具审批、
   二进制行级 diff、取消/磁盘/SQLite 故障注入、Project 级 `.project` 上下文。
 

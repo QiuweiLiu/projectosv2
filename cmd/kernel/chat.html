@@ -151,6 +151,7 @@
       </select>
       <div class="hint" style="margin-top:7px">关联后，聊天会在该项目目录中进行；写文件/执行命令仍会逐次请求批准。</div>
     </div>
+    <div class="card" id="projectCard"><div class="hint">项目上下文加载中…</div></div>
     <div class="card" id="objCard">
       <div class="hint">未关联 Objective。</div>
     </div>
@@ -223,8 +224,31 @@ async function loadProjects(){
   const sel = $('projSel');
   if(!sel) return;
   sel.innerHTML = state.projects.map(p => '<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join('');
+  await loadProjectPanel(sel.value);
 }
-$('projSel').onchange = () => { loadObjectives(); };
+$('projSel').onchange = () => { loadObjectives(); loadProjectPanel($('projSel').value); };
+
+async function loadProjectPanel(projectId){
+  if(!projectId){ $('projectCard').innerHTML = '<div class="hint">未选择项目。</div>'; return; }
+  try {
+    const d = await api('/api/projects/'+encodeURIComponent(projectId));
+    const s = d.snapshot || {};
+    const objs = s.objectives || [];
+    const verified = s.verified || [];
+    const blockers = s.blockers || [];
+    const decisions = s.decisions || [];
+    let html = '<div class="kv"><div>项目</div><div><b>'+esc(s.name || d.project.name)+'</b></div>' +
+      '<div>目标</div><div>'+objs.length+' 个</div></div>';
+    if(s.description) html += '<div class="hint" style="margin-top:6px">'+esc(clip(s.description, 160))+'</div>';
+    if(objs.length) html += '<div style="margin-top:8px">'+objs.slice(0,4).map(o =>
+      '<div class="task"><span class="id">'+esc(o.id)+'</span><span>'+esc(clip(o.title || o.goal, 26))+'</span><span class="st">'+esc(statusLabel(o.status))+'</span></div>').join('')+'</div>';
+    if(blockers.length) html += '<div class="hint" style="margin-top:8px;color:#b42318">阻塞：'+esc(clip(blockers[0], 100))+'</div>';
+    if(verified.length) html += '<div class="hint" style="margin-top:8px">已验证：'+esc(verified.length)+' 项</div>';
+    if(decisions.length) html += '<div class="hint" style="margin-top:6px">决策：'+esc(clip(decisions[decisions.length-1], 100))+'</div>';
+    html += '<div class="hint" style="margin-top:7px">来自 project-state 的派生快照，不是手写日志。</div>';
+    $('projectCard').innerHTML = html;
+  } catch(e) { $('projectCard').innerHTML = '<div class="hint">'+esc(e.message)+'</div>'; }
+}
 
 async function loadObjectives(){
   try { state.objs = await api('/api/objectives'); } catch(e) { state.objs = []; }
@@ -280,6 +304,7 @@ async function selectConv(id){
     $('stopBtn').disabled = d.conversation.status !== 'running';
     $('toGoalBtn').disabled = false;
     if($('projSel') && d.conversation.projectId) $('projSel').value = d.conversation.projectId;
+    await loadProjectPanel(d.conversation.projectId || ($('projSel') ? $('projSel').value : ''));
     $('objSel').value = d.conversation.objectiveId || '';
     const obj = state.objs.find(o => o.id === d.conversation.objectiveId);
     $('objLabel').textContent = obj ? ('· ' + (obj.title || obj.goal)) : '';

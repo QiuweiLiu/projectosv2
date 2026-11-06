@@ -130,6 +130,7 @@ func (c *controlServer) createGoal(w http.ResponseWriter, r *http.Request) {
 	dir = c.ws.adopt(dir, id)
 	c.set(id, "draft")
 	c.ws.invalidate()
+	_, _ = c.ws.ProjectSnapshot(projectID)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = writeJSON(w, map[string]string{"objective": id, "status": "draft"})
@@ -353,6 +354,13 @@ func (c *controlServer) objectiveAction(w http.ResponseWriter, r *http.Request, 
 // settleRun reports the user's intent when a run stops: a cancelled objective
 // exits non-zero, and calling that a failure hides what actually happened.
 func (c *controlServer) settleRun(id string, runErr error) {
+	// Keep the project-level derived snapshot current after a managed run.
+	defer func() {
+		if p, ok, _ := c.ws.find(id); ok {
+			_, _ = c.ws.ProjectSnapshot(p.ProjectID)
+			c.ws.invalidate()
+		}
+	}()
 	if runErr == nil {
 		c.set(id, "completed")
 		return

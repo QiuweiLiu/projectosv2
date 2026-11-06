@@ -8,7 +8,7 @@
 仍禁止：改 research-agent-os、改全局配置、不可逆操作、未批准的付费/远程副作用。
 
 ## Verified Baseline
-- 188 项 Go 测试 + race + vet 全绿；kernel 审计 0 fail / 1 warn（根目录布局）。
+- 192 项 Go 测试 + race + vet 全绿；kernel 审计 0 fail / 1 warn（根目录布局）。
 - Workspace 双目标创建/切换/详情/汇报/事件已验证；真实目标完成全流程。
 - 审批弹窗、diff、桌面 `--check` 已验证；token 为 provider 实测值。
 

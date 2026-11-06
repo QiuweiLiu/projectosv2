@@ -56,7 +56,10 @@ kernel serve --dir D --stop                 # 停掉 HTTP 服务
 | POST | `/api/tasks/{id}/explain?objective=…` | 让汇报人把该任务的审查意见翻成中文（按 findings 哈希缓存） |
 | GET | `/api/jobs` | 各目标最近一次动作的状态（内存态，非权威） |
 | GET | `/api/projects` | Project 目录（默认项目 + 已创建项目） |
-| POST | `/api/projects` | `{name}` 创建 Project 元数据 |
+| POST | `/api/projects` | `{name,description}` 创建 Project 元数据 |
+| GET | `/api/projects/{id}` | 重建并返回项目级 `.project` 快照 |
+| POST | `/api/projects/{id}/refresh` | 强制重建项目快照 |
+| POST | `/api/projects/{id}/decisions` | `{text}` 追加项目级决策并刷新 |
 
 未带 token → 401；`--control` 未开启 → 403。
 

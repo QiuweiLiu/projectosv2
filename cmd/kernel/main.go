@@ -30,7 +30,7 @@ func main() { os.Exit(run(os.Args[1:])) }
 
 func run(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: kernel <run|status|serve|goal> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: kernel <run|status|serve|goal|project> [flags]")
 		return exitError
 	}
 	switch args[0] {
@@ -42,6 +42,8 @@ func run(args []string) int {
 		return cmdServe(args[1:])
 	case "goal":
 		return cmdGoal(args[1:])
+	case "project":
+		return cmdProject(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", args[0])
 		return exitError

@@ -13,12 +13,13 @@ Status: m1_m2_chat（持久化聊天 + 实时 SSE + 工具审批）
 - **M2**：`/chat` 三栏工作台（项目/对话、聊天、Objective/Task）；SSE `text.delta`
   实时、最终文本落库；工具 `permission.asked` → 允许一次/总是/拒绝；
   `after`/`Last-Event-ID` 重放；桌面壳默认打开 `/chat`。
-- **M3 最小**：`project-catalog.json` + 目标目录 `project.json`；聊天/目标按项目过滤。
+- **M3 最小**：`project-catalog.json` + 目标目录 `project.json`；聊天/目标按项目过滤；
+  项目级 `project-state/<id>/.project/` 快照（目标/成果/阻塞/决策），支持 API/CLI 刷新。
 - 聊天转托管：`/api/goals` + `/api/objectives/{id}/plan`，不自动执行。
 - 任务侧保留 P2：Workspace、多目标、审批、diff、`--session`、work prune、token 实测。
 
 ## Verified
-- 188 项 Go 测试 + `-race` + `vet` 全绿。
+- 192 项 Go 测试 + `-race` + `vet` 全绿。
 - 真实 OpenCode：3 轮聊天、SSE delta、工具写文件 + permission once 批准；
   serve 重启后历史与 Session 恢复；`/api/objectives` 始终为空。
 - 真实托管目标：planner → worker → reviewer → acceptance → **objective acceptance**
@@ -28,8 +29,8 @@ Status: m1_m2_chat（持久化聊天 + 实时 SSE + 工具审批）
 - 基线 HEAD：`c89a06e`；本轮已提交 `a5393f9` 并 push 到 `origin/main`。
 
 ## Open
-- 托管任务的暂停调度（pause/resume）尚未实现；当前只有 cancel。
-- Project 级 `.project` 快照、跨 Objective 上下文共享未完成；只有归属映射。
+- 项目级 `.project` 快照已实现；尚未自动注入聊天/Planner prompt。
+- 暂停/继续调度已实现（pause/unpause），但当前 Run 仍会完成。
 - Cockpit 的 Kernel 事件仍是轮询；聊天已 SSE，`/api/events/stream` 已提供但 UI 未切换。
 - 聊天消息历史无级联清理；事件每对话保留 500 条。
 - 托管任务仍是执行前审批，不是逐工具拦截；command 不是沙箱。
@@ -43,5 +44,5 @@ Status: m1_m2_chat（持久化聊天 + 实时 SSE + 工具审批）
 
 ## Next
 1. 在 `/chat` 关联真实 Objective，跑“聊天 → 转托管 → 计划 → 执行 → 交付”全流程。
-2. 决定是否实现 pause/resume 与 Project 级 `.project`。
+2. 决定项目级上下文如何注入聊天/Planner（快照已有）。
 3. 把 Cockpit 时间线切到 `/api/events/stream`，再做日志/消息保留策略。

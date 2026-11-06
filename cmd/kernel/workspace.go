@@ -10,7 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"projectos/kernel/internal/domain"
 	"projectos/kernel/internal/goal"
+	"projectos/kernel/internal/projectstate"
 	"projectos/kernel/internal/store"
 )
 
@@ -38,9 +40,10 @@ type project struct {
 // ProjectInfo is the lightweight project identity above objectives. It is kept
 // in a workspace catalog; objective state stays in its own kernel.db.
 type ProjectInfo struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
 }
 
 const defaultProjectID = "proj-default"
@@ -275,6 +278,10 @@ func (w *workspace) Projects() ([]ProjectInfo, error) {
 }
 
 func (w *workspace) CreateProject(name string) (ProjectInfo, error) {
+	return w.CreateProjectWithDescription(name, "")
+}
+
+func (w *workspace) CreateProjectWithDescription(name, description string) (ProjectInfo, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return ProjectInfo{}, fmt.Errorf("project name is required")
@@ -283,7 +290,8 @@ func (w *workspace) CreateProject(name string) (ProjectInfo, error) {
 	if err != nil {
 		return ProjectInfo{}, err
 	}
-	info := ProjectInfo{ID: fmt.Sprintf("proj-%d", time.Now().UnixNano()), Name: name, CreatedAt: time.Now().UTC()}
+	info := ProjectInfo{ID: fmt.Sprintf("proj-%d", time.Now().UnixNano()), Name: name,
+		Description: strings.TrimSpace(description), CreatedAt: time.Now().UTC()}
 	list = append(list, info)
 	raw, err := json.MarshalIndent(map[string]any{"projects": list}, "", "  ")
 	if err != nil {
@@ -293,7 +301,136 @@ func (w *workspace) CreateProject(name string) (ProjectInfo, error) {
 	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
 		return ProjectInfo{}, err
 	}
-	return info, os.Rename(tmp, w.catalogPath())
+	if err := os.Rename(tmp, w.catalogPath()); err != nil {
+		return ProjectInfo{}, err
+	}
+	_, _ = w.ProjectSnapshot(info.ID)
+	return info, nil
+}
+
+// ProjectSnapshot rebuilds the project view from the objective databases and
+// writes <root>/project-state/<id>/.project. The databases remain authoritative;
+// this is a bounded, derived context file.
+func (w *workspace) ProjectSnapshot(id string) (projectstate.ProjectSnapshot, error) {
+	snap, err := w.BuildProjectSnapshot(id)
+	if err != nil {
+		return projectstate.ProjectSnapshot{}, err
+	}
+	if err := projectstate.WriteProject(w.root, snap); err != nil {
+		return projectstate.ProjectSnapshot{}, err
+	}
+	return snap, nil
+}
+
+// BuildProjectSnapshot is the read-only form: it rebuilds facts without touching
+// project-state. GET endpoints use it so an unauthenticated read cannot write.
+func (w *workspace) BuildProjectSnapshot(id string) (projectstate.ProjectSnapshot, error) {
+	info, ok, err := w.FindProject(id)
+	if err != nil {
+		return projectstate.ProjectSnapshot{}, err
+	}
+	if !ok {
+		return projectstate.ProjectSnapshot{}, fmt.Errorf("unknown project %s", id)
+	}
+	w.invalidate()
+	all, err := w.list()
+	if err != nil {
+		return projectstate.ProjectSnapshot{}, err
+	}
+	var objectives []projectstate.ProjectObjective
+	var verified []string
+	for _, p := range all {
+		if p.ProjectID != id {
+			continue
+		}
+		row := projectstate.ProjectObjective{ID: p.Obj.ID, Title: p.Obj.Title, Goal: p.Obj.Goal,
+			Status: string(p.Obj.Status), PlanVersion: p.Obj.PlanVersion, UpdatedAt: p.Obj.UpdatedAt,
+			Delivery: deliveryPresent(p.Dir)}
+		st, err := store.OpenReadOnly(filepath.Join(p.Dir, "kernel.db"))
+		if err != nil {
+			continue
+		}
+		tasks, _ := st.List()
+		for _, t := range tasks {
+			if t.ObjectiveID != p.Obj.ID {
+				continue
+			}
+			row.Total++
+			if t.Status == domain.TaskAccepted {
+				row.Accepted++
+				verified = append(verified, p.Obj.ID+"\x00"+string(t.ID)+"\x00"+t.ArtifactPath)
+			}
+			if t.Status == domain.TaskBlocked || t.Status == domain.TaskRejected {
+				reason := t.LastError
+				if reason == "" {
+					reason = string(t.Status)
+				}
+				row.Blockers = append(row.Blockers, string(t.ID)+": "+reason)
+			}
+		}
+		if p.Obj.Status == goal.StatusFailed {
+			if reviews, err := st.ReviewsFor(domain.TaskID("objective:" + p.Obj.ID)); err == nil {
+				for i := len(reviews) - 1; i >= 0; i-- {
+					if reviews[i].Kind == domain.ReviewObjective && reviews[i].Blocking() {
+						for _, f := range reviews[i].Findings {
+							if f.Severity == domain.SeverityP0 || f.Severity == domain.SeverityP1 {
+								row.Blockers = append(row.Blockers, "objective acceptance: "+f.Message)
+							}
+						}
+						break
+					}
+				}
+			}
+		}
+		st.Close()
+		objectives = append(objectives, row)
+	}
+	snap := projectstate.BuildProject(projectstate.ProjectMeta{ID: info.ID, Name: info.Name, CreatedAt: info.CreatedAt}, objectives, w.projectDecisions(id))
+	for _, v := range verified {
+		parts := strings.SplitN(v, "\x00", 3)
+		if len(parts) == 3 {
+			snap.AddVerified(parts[0], parts[1], parts[2])
+		}
+	}
+	return snap, nil
+}
+
+func (w *workspace) projectDecisions(id string) []string {
+	raw, err := os.ReadFile(filepath.Join(w.root, "project-state", id, "decisions.json"))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	_ = json.Unmarshal(raw, &out)
+	return out
+}
+
+func (w *workspace) appendProjectDecision(id, text string) error {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return fmt.Errorf("decision is required")
+	}
+	if len([]rune(text)) > 500 {
+		text = string([]rune(text)[:500]) + "…"
+	}
+	list := w.projectDecisions(id)
+	list = append(list, text)
+	if len(list) > 20 {
+		list = list[len(list)-20:]
+	}
+	raw, err := json.MarshalIndent(list, "", "  ")
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(w.root, "project-state", id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp := filepath.Join(dir, "decisions.json.tmp")
+	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(dir, "decisions.json"))
 }
 
 func (w *workspace) FindProject(id string) (ProjectInfo, bool, error) {

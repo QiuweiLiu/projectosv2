@@ -81,5 +81,29 @@ Workspace 根有 `project-catalog.json`，每个目标目录有 `project.json`�
 - `GET /api/objectives` 返回 `projectId`，聊天/驾驶舱可按项目过滤；
 - 旧目标没有 `project.json` 时归入 `proj-default`，不需要迁移。
 
-这只是**身份与归属**，还没有 Project 级 `.project/` 快照或跨 Objective 上下文共享；
-这些留到下一阶段，不能用 UI 假装已经存在。
+### 项目级 `.project/` 快照
+
+每个 Project 在 `D/project-state/<projectID>/.project/` 下有一份**派生**快照：
+
+```
+PROJECT.md    项目名、描述、目标列表、已验证成果
+STATE.md      目标状态表、交付标记、阻塞
+HANDOFF.md    活跃目数量、当前阻塞、下一步
+DECISIONS.md  项目级重要决策（显式记录）
+snapshot.json 结构化快照 + hash
+```
+
+- 数据只来自各目标 SQLite 的已验证事实（状态、任务计数、交付、objective review 阻塞）
+  和显式 `decisions.json`；不收录原始日志、聊天内容或未验证模型说法。
+- 快照有容量上限：单文件 8KB，最多 8 个目标/12 条已验证/6 条阻塞/3 条决策；超出截断。
+- `GET /api/projects/{id}` 会重建并返回快照；`POST /api/projects/{id}/refresh` 强制刷新；
+  `POST /api/projects/{id}/decisions` 追加决策后刷新。
+- CLI：
+
+```sh
+kernel project list --dir D
+kernel project snapshot --dir D --project proj-...
+kernel project decision --dir D --project proj-... --text "采用 baseline B"
+```
+
+快照不是运行时权威；数据库才是。删除 `project-state/` 不会丢目标状态。

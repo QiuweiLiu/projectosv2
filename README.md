@@ -28,7 +28,7 @@ P2 可用性已完成并验证：
 - Project / Objective 目录与归属映射；
 - macOS 原生外壳（非 Electron），默认打开 `/chat`。
 
-188 项 Go 测试 + `-race` + `vet` 全绿。边界与未实现项见 `docs/api.md` 第 11 节和
+192 项 Go 测试 + `-race` + `vet` 全绿。边界与未实现项见 `docs/api.md` 第 11 节和
 `.project/HANDOFF.md`。
 
 ## 快速开始
@@ -46,6 +46,10 @@ go build -o bin/kernel ./cmd/kernel
 # 多目标驾驶舱 + 聊天
 ./bin/kernel serve --dir ~/ProjectOS --control --daemon
 # 浏览器打开输出地址；聊天在 /chat
+
+# 项目级快照
+./bin/kernel project list --dir ~/ProjectOS
+./bin/kernel project snapshot --dir ~/ProjectOS --project proj-...
 ```
 
 `goal run` 需要能访问已注册的 OpenCode provider/model；模型配置见 `docs/models.md`。

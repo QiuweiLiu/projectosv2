@@ -55,6 +55,6 @@ OpenCode 执行自动变成成功；重新打开后通过 Session/message 同步
 ## 未完成
 
 - 聊天历史的全文搜索与导出；
-- Project 级共享上下文（当前只做 Project 目录 + Objective 归属）；
+- 把 `project-state/<id>/.project` 自动注入聊天上下文（快照已生成，但尚未注入 prompt）；
 - 多聊天并发上限与跨设备同步；
 - 将 Kernel 事件流也改成同等级别的 SSE。

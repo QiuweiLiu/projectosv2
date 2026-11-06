@@ -6,7 +6,7 @@ OpenCode v2 Session + SSE 流 + 工具级 ask 审批；聊天可显式转成托�
 Kernel 仍是 Task/Run 唯一写者；单机、单用户、多目标 Workspace + Project 归属。
 
 ## Verified
-- **188 项测试 + `-race` + `vet` 全绿**；真实运行后无残留进程。本轮提交 `a5393f9`，已 push。
+- **192 项测试 + `-race` + `vet` 全绿**；真实运行后无残留进程。本轮提交 `a5393f9`，已 push。
 - **场景 A**：待办应用 3 任务，`node test.js` 验收，`out/` 组装后 11–14 项测试通过。
 - **场景 B**：sales.csv → summarize.js → summary.md，总额 60（一次通过，0 阻断）。
 - **场景 C**：真实模型重规划（T1 失败 → T1-fix → 完成）。
@@ -25,7 +25,8 @@ Kernel 仍是 Task/Run 唯一写者；单机、单用户、多目标 Workspace +
 - **M1/M2 真实聊天**：OpenCode 2.2.5 私有 v2 Server；Session 创建/续聊/prompt；
   SSE `text.delta` 实时、最终文本落库；工具 `permission.asked` → UI 批准；重启后历史恢复；
   聊天不产生 Objective。SSE 事件 `after`/`Last-Event-ID` 可重放。
-- **M3 最小**：Project catalog + objective 的 `project.json` 归属；聊天可按项目过滤。
+- **M3 最小**：Project catalog + objective 的 `project.json` 归属；聊天可按项目过滤；
+  项目级 `project-state/<id>/.project/` 快照（目标/成果/阻塞/决策），有 8KB 上限。
 - 真实校验：`/chat` 浏览器发送、流式回复、工具权限、重启恢复；详见 HANDOFF。
 - **CLI 执行器**：`opencode-go/minimax-m3.1-flash` 与 `deepseek-v4.1-flash` 真实跑通 计划 → worker → reviewer →
   acceptance → 交付；崩溃残留进程回收有回归测试。
@@ -62,6 +63,6 @@ Kernel 仍是 Task/Run 唯一写者；单机、单用户、多目标 Workspace +
 - 会话续跑只续对话上下文，不续工作目录；重试仍在新目录。
 - 聊天事件只保留最近 500 条/对话；`text_delta` 不持久化；消息历史无级联清理。
 - 托管任务仍是执行前审批，不是逐工具拦截；command 不是沙箱。
-- Project 只有目录与归属，没有项目级 `.project` 快照/跨 Objective 上下文。
+- 项目级 `.project` 快照已生成；尚未把它自动注入聊天/Planner 的 prompt。
 - 未做：Cockpit SSE（聊天已 SSE）、Windows/Linux、二进制行级 diff、日志轮转。
 - 未注入：取消与调度器完成的进程级交错、磁盘满/只读挂载、运行中 SQLite 失效。

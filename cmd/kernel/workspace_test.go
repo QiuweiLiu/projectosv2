@@ -2,13 +2,17 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"projectos/kernel/internal/domain"
 	"projectos/kernel/internal/goal"
+	"projectos/kernel/internal/projectstate"
 	"projectos/kernel/internal/store"
 )
 
@@ -160,5 +164,106 @@ func TestWorkspaceProjectCatalog(t *testing.T) {
 	}
 	if len(all) != 1 || all[0].ProjectID != p.ID {
 		t.Fatalf("objective project mapping = %+v", all)
+	}
+}
+
+func TestProjectSnapshotBuildsFromObjectiveDB(t *testing.T) {
+	root := t.TempDir()
+	ws := newWorkspace(root)
+	project, err := ws.CreateProject("GPU Scheduling")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "projects", "obj-a")
+	seedProject(t, dir, "obj-a")
+	if err := writeProjectMeta(dir, project.ID); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(dir, "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateTask(domain.Task{ID: "T1", ObjectiveID: "obj-a", PlanVersion: 1,
+		ArtifactPath: "a.txt", Validator: "nonempty"}); err != nil {
+		t.Fatal(err)
+	}
+	run, ok, err := st.Claim("T1", "r1", "fake")
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	if _, err := st.SettleRun(store.Settlement{RunID: run.ID, RunStatus: domain.RunSucceeded,
+		Result: "done", Accepted: true}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	if err := ws.appendProjectDecision(project.ID, "use baseline B"); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := ws.ProjectSnapshot(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Objectives) != 1 || snap.Objectives[0].Accepted != 1 || snap.Objectives[0].Total != 1 {
+		t.Fatalf("objectives = %+v", snap.Objectives)
+	}
+	if len(snap.Verified) != 1 || !strings.Contains(snap.Verified[0], "T1 a.txt") {
+		t.Fatalf("verified = %+v", snap.Verified)
+	}
+	if len(snap.Decisions) != 1 || snap.Decisions[0] != "use baseline B" {
+		t.Fatalf("decisions = %+v", snap.Decisions)
+	}
+	for _, name := range []string{"PROJECT.md", "STATE.md", "HANDOFF.md", "DECISIONS.md", "snapshot.json"} {
+		if _, err := os.Stat(filepath.Join(projectstate.ProjectDir(root, project.ID), name)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+}
+
+func TestProjectAPIExposesAndRefreshesSnapshot(t *testing.T) {
+	root := t.TempDir()
+	ws := newWorkspace(root)
+	mux, ctl, err := buildMux(ws, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	project, err := ws.CreateProjectWithDescription("GPU Scheduling", "long-term context")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := http.Get(ts.URL + "/api/projects/" + project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("GET project = %d", res.StatusCode)
+	}
+	var view struct {
+		Project  ProjectInfo                  `json:"project"`
+		Snapshot projectstate.ProjectSnapshot `json:"snapshot"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&view); err != nil {
+		t.Fatal(err)
+	}
+	if view.Snapshot.ProjectID != project.ID || view.Snapshot.Name != "GPU Scheduling" {
+		t.Fatalf("snapshot = %+v", view.Snapshot)
+	}
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/projects/"+project.ID+"/decisions",
+		strings.NewReader(`{"text":"use baseline B"}`))
+	req.Header.Set("X-Kernel-Token", ctl.token)
+	req.Header.Set("Content-Type", "application/json")
+	res2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res2.Body.Close()
+	if res2.StatusCode != 200 {
+		t.Fatalf("decision = %d", res2.StatusCode)
+	}
+	raw, err := os.ReadFile(filepath.Join(projectstate.ProjectDir(root, project.ID), "DECISIONS.md"))
+	if err != nil || !strings.Contains(string(raw), "use baseline B") {
+		t.Fatalf("decisions = %s %v", raw, err)
 	}
 }
