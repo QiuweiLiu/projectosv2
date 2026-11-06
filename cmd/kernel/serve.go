@@ -20,7 +20,10 @@ import (
 	"syscall"
 	"time"
 
+	"projectos/kernel/internal/chat"
+	"projectos/kernel/internal/conversation"
 	"projectos/kernel/internal/domain"
+	"projectos/kernel/internal/modelcfg"
 	"projectos/kernel/internal/store"
 )
 
@@ -373,7 +376,23 @@ func serveForeground(dir, addr string, control bool) int {
 		return exitError
 	}
 	ws := newWorkspace(dir)
-	mux, ctl, err := buildMux(ws, control)
+	cstore, err := conversation.Open(filepath.Join(dir, "conversations.db"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "conversation store:", err)
+		return exitError
+	}
+	defer cstore.Close()
+	settings := modelcfg.Load(dir)
+	defaultModel := settings.Chat
+	if defaultModel == "" {
+		defaultModel = settings.Worker
+	}
+	if defaultModel == "" {
+		defaultModel = "deepseek/deepseek-flash"
+	}
+	chatMgr := chat.New(chat.Config{Bin: os.Getenv("OPENCODE_BIN"), Root: dir, DefaultModel: defaultModel}, cstore)
+	defer chatMgr.Close()
+	mux, ctl, err := buildMux(ws, control, chatMgr)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "control:", err)
 		return exitError
@@ -392,7 +411,7 @@ func serveForeground(dir, addr string, control bool) int {
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      0, // chat uses SSE; per-handler deadlines still apply
 		IdleTimeout:       60 * time.Second,
 	}
 
@@ -414,7 +433,7 @@ func serveForeground(dir, addr string, control bool) int {
 	return exitOK
 }
 
-func buildMux(ws *workspace, control bool) (*http.ServeMux, *controlServer, error) {
+func buildMux(ws *workspace, control bool, chatMgr *chat.Manager) (*http.ServeMux, *controlServer, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -422,6 +441,9 @@ func buildMux(ws *workspace, control bool) (*http.ServeMux, *controlServer, erro
 			return
 		}
 		serveDashboard(w)
+	})
+	mux.HandleFunc("/chat", func(w http.ResponseWriter, r *http.Request) {
+		serveChatPage(w)
 	})
 	mux.HandleFunc("/files/", func(w http.ResponseWriter, r *http.Request) {
 		serveFile(w, r, ws)
@@ -463,6 +485,9 @@ func buildMux(ws *workspace, control bool) (*http.ServeMux, *controlServer, erro
 	})
 	mux.HandleFunc("/api/diff", func(w http.ResponseWriter, r *http.Request) {
 		serveDiff(w, r, ws)
+	})
+	mux.HandleFunc("/api/events/stream", func(w http.ResponseWriter, r *http.Request) {
+		serveEventStream(w, r, ws)
 	})
 	mux.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
 		p, ok, err := ws.resolve(r.URL.Query().Get("objective"))
@@ -524,6 +549,41 @@ func buildMux(ws *workspace, control bool) (*http.ServeMux, *controlServer, erro
 		defer st.Close()
 		serveReport(w, st, p.Dir)
 	})
+	mux.HandleFunc("/api/projects", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			list, err := ws.Projects()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			_ = writeJSON(w, list)
+		case http.MethodPost:
+			if ctl == nil {
+				http.Error(w, "server was started without --control", http.StatusForbidden)
+				return
+			}
+			if !ctl.authorised(r) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			var req struct {
+				Name string `json:"name"`
+			}
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+				http.Error(w, "bad json", http.StatusBadRequest)
+				return
+			}
+			p, err := ws.CreateProject(req.Name)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			_ = writeJSON(w, p)
+		default:
+			http.Error(w, "GET or POST only", http.StatusMethodNotAllowed)
+		}
+	})
 	mux.HandleFunc("/api/objectives", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "GET only", http.StatusMethodNotAllowed)
@@ -555,6 +615,7 @@ func buildMux(ws *workspace, control bool) (*http.ServeMux, *controlServer, erro
 		}
 	})
 	if ctl != nil {
+		registerChatRoutes(mux, ctl, chatMgr, ws)
 		mux.HandleFunc("/api/goals", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost {
 				http.Error(w, "POST only", http.StatusMethodNotAllowed)

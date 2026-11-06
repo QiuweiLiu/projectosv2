@@ -1,12 +1,12 @@
 # State
 
 ## Stage
-P2 完成：自然语言目标 → 计划 → 人工确认 + 执行前审批 → 并行执行 → 三层验收 →
-有界重规划 → 交付 → 继续改进/恢复。默认执行器是 OpenCode CLI；有后台服务、读写 API、
-中文驾驶舱与 macOS 原生外壳。单机、单用户、多目标 Workspace。
+M1/M2 完成：在 P2 的 Kernel 之上增加持久化聊天工作台。普通聊天不创建 Objective；
+OpenCode v2 Session + SSE 流 + 工具级 ask 审批；聊天可显式转成托管目标。
+Kernel 仍是 Task/Run 唯一写者；单机、单用户、多目标 Workspace + Project 归属。
 
 ## Verified
-- **174 项测试 + `-race` + `vet` 全绿**；真实运行后无残留进程。
+- **188 项测试 + `-race` + `vet` 全绿**；真实运行后无残留进程。
 - **场景 A**：待办应用 3 任务，`node test.js` 验收，`out/` 组装后 11–14 项测试通过。
 - **场景 B**：sales.csv → summarize.js → summary.md，总额 60（一次通过，0 阻断）。
 - **场景 C**：真实模型重规划（T1 失败 → T1-fix → 完成）。
@@ -20,6 +20,13 @@ P2 完成：自然语言目标 → 计划 → 人工确认 + 执行前审批 →
   陈旧取消标记都有故障注入/集成测试。
 - **P2**：Workspace 双目标创建/切换/详情/汇报/事件；真实目标全流程；审批弹窗、
   文本 diff、桌面 `--check`；token 为 provider 实测值。
+- **M0**：`runNow` 只生成计划，不再隐式确认/执行；Objective 级 acceptance 成为独立
+  完成门禁；删除旧代码生成的 query-string SQLite 残留并加忽略规则。
+- **M1/M2 真实聊天**：OpenCode 2.2.5 私有 v2 Server；Session 创建/续聊/prompt；
+  SSE `text.delta` 实时、最终文本落库；工具 `permission.asked` → UI 批准；重启后历史恢复；
+  聊天不产生 Objective。SSE 事件 `after`/`Last-Event-ID` 可重放。
+- **M3 最小**：Project catalog + objective 的 `project.json` 归属；聊天可按项目过滤。
+- 真实校验：`/chat` 浏览器发送、流式回复、工具权限、重启恢复；详见 HANDOFF。
 - **CLI 执行器**：`opencode-go/minimax-m3.1-flash` 与 `deepseek-v4.1-flash` 真实跑通 计划 → worker → reviewer →
   acceptance → 交付；崩溃残留进程回收有回归测试。
 - **全量审查**：34 条（P0×3/P1×22/P2×9），已修 25，未修 9 见 Remaining。
@@ -47,11 +54,14 @@ P2 完成：自然语言目标 → 计划 → 人工确认 + 执行前审批 →
 - **恢复**：写打开独占 `kernel.lock` 并恢复；读命令只读打开，不触发恢复。
 - **P2**：多目标 Workspace、执行前审批、文本 diff、`--session` 续跑、work 保留 20、token 实测优先、
   macOS 原生外壳（WKWebView）。
+- **聊天**：Conversation SQLite、OpenCode v2 Session/SSE、工具 ask 审批、历史同步、Project 过滤。
 
 ## Remaining
 - **命令验收不是沙箱**：允许列表只防注入，不防合法命令读全盘/联网（见 `docs/security.md`）。
 - 计划字段 `scope/inputs/allowed/forbidden/acceptance/priority` 不参与机器判定（`docs/plan-semantics.md`）。
 - 会话续跑只续对话上下文，不续工作目录；重试仍在新目录。
-- `aoenv` 可能采纳外来 daemon；日志无轮转；worker 无资源限制；审查首次阻断成本高。
-- 未做：SSE、Windows/Linux 桌面壳、逐工具调用审批、二进制行级 diff、日志轮转。
+- 聊天事件只保留最近 500 条/对话；`text_delta` 不持久化；消息历史无级联清理。
+- 托管任务仍是执行前审批，不是逐工具拦截；command 不是沙箱。
+- Project 只有目录与归属，没有项目级 `.project` 快照/跨 Objective 上下文。
+- 未做：Cockpit SSE（聊天已 SSE）、Windows/Linux、二进制行级 diff、日志轮转。
 - 未注入：取消与调度器完成的进程级交错、磁盘满/只读挂载、运行中 SQLite 失效。

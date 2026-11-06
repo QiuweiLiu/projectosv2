@@ -100,7 +100,7 @@ func resolveRoleModel(dir, role, explicit string) string {
 
 func cmdGoal(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: kernel goal <create|plan|show|confirm|run|status|export|resume|cancel|report|explain|continue|models|prune> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: kernel goal <create|plan|show|confirm|run|status|export|resume|cancel|pause|unpause|report|explain|continue|models|prune> [flags]")
 		return exitError
 	}
 	switch args[0] {
@@ -120,6 +120,8 @@ func cmdGoal(args []string) int {
 		return goalExport(args[1:])
 	case "resume":
 		return goalResume(args[1:])
+	case "unpause":
+		return goalUnpause(args[1:])
 	case "cancel":
 		return goalCancel(args[1:])
 	case "report":
@@ -132,6 +134,8 @@ func cmdGoal(args []string) int {
 		return goalModels(args[1:])
 	case "prune":
 		return goalPrune(args[1:])
+	case "pause":
+		return goalPause(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown goal command %q\n", args[0])
 		return exitError
@@ -544,9 +548,10 @@ func goalRun(args []string) int {
 		fmt.Fprintln(os.Stderr, "inspect the workspace, then rerun with --clear-quarantine")
 		return exitBlocked
 	}
-	// A cancel flag left by a previous scheduler is stale: it was written while
-	// that scheduler owned the dir, and we own it now.
+	// Cancel and pause flags from a previous scheduler are stale: they were
+	// written while that scheduler owned the dir, and we own it now.
 	_ = os.Remove(cancelPath(*dir))
+	_ = os.Remove(pausePath(*dir))
 	// Role backends share the workspace root; for AO they also share the daemon.
 	roleBackend := func(model string) exec.Backend {
 		if *executor == "opencode" {
@@ -565,7 +570,10 @@ func goalRun(args []string) int {
 	}
 	if *acceptanceOn {
 		if *executor != "fake" {
-			e = e.WithAcceptance(ao.NewAcceptance(roleBackend(acceptanceModelResolved)))
+			acc := ao.NewAcceptance(roleBackend(acceptanceModelResolved))
+			// Task acceptance answers "did this artifact do its job"; objective
+			// acceptance answers "did the delivered set satisfy the original goal".
+			e = e.WithAcceptance(acc).WithObjectiveJudge(acc)
 		}
 	}
 	existing := map[domain.TaskID]bool{}
@@ -588,6 +596,7 @@ func goalRun(args []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), *limit)
 	defer cancel()
 	replans := 0
+	paused := false
 	for {
 		if reason, cancelled := takeCancelRequest(*dir); cancelled {
 			abortCtx, abortCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -604,6 +613,26 @@ func goalRun(args []string) int {
 			_, _ = pruneWork(*dir, *keepWork)
 			fmt.Println("objective cancelled")
 			return exitBlocked
+		}
+		if pauseRequested(*dir) {
+			if !paused {
+				fmt.Println("scheduler paused; waiting for resume")
+				paused = true
+			}
+			select {
+			case <-ctx.Done():
+				abortCtx, abortCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				_, _ = e.Abort(abortCtx, "goal timeout while paused")
+				abortCancel()
+				fmt.Fprintln(os.Stderr, "goal timed out while paused")
+				return exitError
+			case <-time.After(*interval):
+			}
+			continue
+		}
+		if paused {
+			fmt.Println("scheduler resumed")
+			paused = false
 		}
 		if _, err := e.Step(ctx); err != nil {
 			fmt.Fprintln(os.Stderr, "step:", err)
@@ -640,6 +669,17 @@ func goalRun(args []string) int {
 			}
 		}
 		if accepted {
+			blocked, jerr := e.JudgeObjective(ctx, obj, plan.Spec)
+			if jerr != nil {
+				fmt.Fprintln(os.Stderr, "objective acceptance:", jerr)
+				_ = st.AppendEvent("", "objective_acceptance_error", jerr.Error())
+				return failGoal(st, obj, current)
+			}
+			if blocked {
+				fmt.Fprintln(os.Stderr, "objective acceptance: the delivered set does not fulfil the original goal")
+				_ = st.AppendEvent("", "objective_blocked", "objective acceptance found a blocking gap")
+				return failGoal(st, obj, current)
+			}
 			code := finishGoal(st, obj, current, *dir)
 			_, _ = pruneWork(*dir, *keepWork)
 			return code
@@ -1024,6 +1064,65 @@ func firstLine(s string, n int) string {
 // dir may change task state, so callers drop a flag file that the scheduler
 // honours on its next iteration.
 func cancelPath(dir string) string { return filepath.Join(dir, "cancel") }
+
+func pausePath(dir string) string { return filepath.Join(dir, "pause") }
+
+func pauseRequested(dir string) bool { return fileExists(pausePath(dir)) }
+
+// Pause is a request to a live scheduler; it is not an Objective status. The
+// current in-flight Run is allowed to finish, but no new task is started.
+func goalPause(args []string) int {
+	fs := flag.NewFlagSet("goal pause", flag.ContinueOnError)
+	dir := fs.String("dir", "", "state directory")
+	reason := fs.String("reason", "paused by user", "why scheduling is paused")
+	if err := fs.Parse(args); err != nil {
+		return exitError
+	}
+	if strings.TrimSpace(*dir) == "" {
+		fmt.Fprintln(os.Stderr, "pause requires --dir")
+		return exitError
+	}
+	if err := os.MkdirAll(*dir, 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, "pause:", err)
+		return exitError
+	}
+	// If no scheduler owns the lock, there is nothing to pause; do not leave a
+	// stale flag that would surprise the next run.
+	st, err := openGoalStore(*dir)
+	if err == nil {
+		st.Close()
+		fmt.Println("no scheduler is running; pause applies only to a live scheduler")
+		return exitOK
+	}
+	if !errors.Is(err, store.ErrLocked) {
+		fmt.Fprintln(os.Stderr, "pause:", err)
+		return exitError
+	}
+	if err := os.WriteFile(pausePath(*dir), []byte(*reason+"\n"), 0o644); err != nil {
+		fmt.Fprintln(os.Stderr, "pause:", err)
+		return exitError
+	}
+	fmt.Println("pause requested; the scheduler will stop starting new tasks")
+	return exitOK
+}
+
+func goalUnpause(args []string) int {
+	fs := flag.NewFlagSet("goal unpause", flag.ContinueOnError)
+	dir := fs.String("dir", "", "state directory")
+	if err := fs.Parse(args); err != nil {
+		return exitError
+	}
+	if strings.TrimSpace(*dir) == "" {
+		fmt.Fprintln(os.Stderr, "resume requires --dir")
+		return exitError
+	}
+	if err := os.Remove(pausePath(*dir)); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintln(os.Stderr, "resume:", err)
+		return exitError
+	}
+	fmt.Println("scheduler resumed")
+	return exitOK
+}
 
 func cancelRequested(dir string) bool {
 	_, err := os.Stat(cancelPath(dir))

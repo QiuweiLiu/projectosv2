@@ -131,3 +131,34 @@ func TestServeObjectiveListAggregatesWorkspace(t *testing.T) {
 		t.Fatalf("ids = %+v", ids)
 	}
 }
+
+func TestWorkspaceProjectCatalog(t *testing.T) {
+	root := t.TempDir()
+	ws := newWorkspace(root)
+	list, err := ws.Projects()
+	if err != nil || len(list) != 1 || list[0].ID != defaultProjectID {
+		t.Fatalf("default catalog = %+v %v", list, err)
+	}
+	p, err := ws.CreateProject("GPU Scheduling")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ID == "" || p.Name != "GPU Scheduling" {
+		t.Fatalf("project = %+v", p)
+	}
+	if _, ok, err := ws.FindProject(p.ID); err != nil || !ok {
+		t.Fatal("created project not found", err)
+	}
+	dir := filepath.Join(root, "projects", "obj-a")
+	seedProject(t, dir, "obj-a")
+	if err := writeProjectMeta(dir, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	all, err := ws.list()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 || all[0].ProjectID != p.ID {
+		t.Fatalf("objective project mapping = %+v", all)
+	}
+}

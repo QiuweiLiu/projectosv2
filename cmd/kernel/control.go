@@ -76,10 +76,11 @@ func (c *controlServer) authorised(r *http.Request) bool {
 }
 
 type goalRequest struct {
-	Goal     string `json:"goal"`
-	Title    string `json:"title"`
-	RunNow   bool   `json:"runNow"`
-	Reviewer bool   `json:"reviewer"`
+	Goal      string `json:"goal"`
+	Title     string `json:"title"`
+	ProjectID string `json:"projectId"`
+	RunNow    bool   `json:"runNow"`
+	Reviewer  bool   `json:"reviewer"`
 }
 
 func (c *controlServer) createGoal(w http.ResponseWriter, r *http.Request) {
@@ -96,9 +97,21 @@ func (c *controlServer) createGoal(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "goal is required", http.StatusBadRequest)
 		return
 	}
+	projectID := strings.TrimSpace(req.ProjectID)
+	if projectID == "" {
+		projectID = defaultProjectID
+	}
+	if _, ok, err := c.ws.FindProject(projectID); err != nil || !ok {
+		http.Error(w, "unknown project", http.StatusBadRequest)
+		return
+	}
 	dir, err := c.ws.newProjectDir()
 	if err != nil {
 		http.Error(w, "create: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := writeProjectMeta(dir, projectID); err != nil {
+		http.Error(w, "project: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	args := []string{"goal", "create", "--dir", dir, "--goal", req.Goal}
@@ -122,7 +135,10 @@ func (c *controlServer) createGoal(w http.ResponseWriter, r *http.Request) {
 	_ = writeJSON(w, map[string]string{"objective": id, "status": "draft"})
 
 	if req.RunNow {
-		go c.planAndRun(id, req.Reviewer)
+		// Legacy `runNow` used to mean plan + confirm + run in one request. That
+		// skipped the exact confirmation the workflow exists to enforce. It now
+		// only plans; the caller must confirm and run explicitly.
+		go c.planOnly(id)
 	}
 }
 
@@ -144,7 +160,7 @@ func objectiveInDir(dir string) (string, error) {
 	return objectives[0].ID, nil
 }
 
-func (c *controlServer) planAndRun(id string, reviewer bool) {
+func (c *controlServer) planOnly(id string) {
 	if !c.claim(id) {
 		c.set(id, "another action is already running")
 		return
@@ -160,13 +176,7 @@ func (c *controlServer) planAndRun(id string, reviewer bool) {
 		c.set(id, "plan failed: "+err.Error())
 		return
 	}
-	if _, err := c.runGoal(p.Dir, "goal", "confirm", "--dir", p.Dir); err != nil {
-		c.set(id, "confirm failed: "+err.Error())
-		return
-	}
-	c.set(id, "running")
-	_, err = c.runGoal(p.Dir, c.runArgs(p.Dir, runRequest{Reviewer: reviewer})...)
-	c.settleRun(id, err)
+	c.set(id, "planned")
 }
 
 type runRequest struct {
@@ -298,6 +308,20 @@ func (c *controlServer) objectiveAction(w http.ResponseWriter, r *http.Request, 
 			c.set(id, "report ready")
 		}()
 		writeJSON(w, map[string]string{"objective": id, "status": "reporting"})
+	case "pause":
+		if _, err := c.runGoal(p.Dir, "goal", "pause", "--dir", p.Dir); err != nil {
+			http.Error(w, "pause: "+err.Error(), http.StatusConflict)
+			return
+		}
+		c.set(id, "paused")
+		_ = writeJSON(w, map[string]string{"objective": id, "status": "pause requested"})
+	case "unpause":
+		if _, err := c.runGoal(p.Dir, "goal", "unpause", "--dir", p.Dir); err != nil {
+			http.Error(w, "unpause: "+err.Error(), http.StatusConflict)
+			return
+		}
+		c.set(id, "running")
+		_ = writeJSON(w, map[string]string{"objective": id, "status": "resumed"})
 	case "cancel":
 		reason := "cancelled from the dashboard"
 		var req struct {

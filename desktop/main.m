@@ -134,7 +134,7 @@ static void StopServer(void) {
     // asking the user to open control-token in a terminal. Fragments never reach
     // the server and the page removes it from the address bar after storing it.
     NSString *token = ControlToken();
-    NSString *url = token ? [NSString stringWithFormat:@"%@/#token=%@", base, token] : base;
+    NSString *url = token ? [NSString stringWithFormat:@"%@/chat#token=%@", base, token] : [base stringByAppendingString:@"/chat"];
     [self.webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:url]]];
     [NSApp activateIgnoringOtherApps:YES];
 }

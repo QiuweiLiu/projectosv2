@@ -823,6 +823,16 @@ func (s *Store) AddReview(rev domain.Review) error {
 		if acceptance > 0 {
 			return ErrReviewLimit
 		}
+	case domain.ReviewObjective:
+		var objective int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM reviews
+			WHERE task_id=? AND artifact_version=? AND kind='objective'`,
+			string(rev.TaskID), rev.ArtifactVersion).Scan(&objective); err != nil {
+			return err
+		}
+		if objective > 0 {
+			return ErrReviewLimit
+		}
 	default:
 		return fmt.Errorf("unknown review kind %q", rev.Kind)
 	}
@@ -843,6 +853,24 @@ func (s *Store) AddReview(rev domain.Review) error {
 		rev.PromptChars, rev.OutputChars, rev.PromptTokens, rev.OutputTokens,
 		boolInt(rev.UsageEstimated), now())
 	return err
+}
+
+// ReviewVerdict reports the most recent judgment of one kind for an artifact
+// version. Unlike HasBlockingReview it never mixes kinds: an objective verdict
+// cannot be overwritten by a targeted task review.
+func (s *Store) ReviewVerdict(taskID domain.TaskID, artifactVersion string, kind domain.ReviewKind) (blocking bool, found bool, err error) {
+	var value int
+	err = s.db.QueryRow(`SELECT blocking FROM reviews
+		WHERE task_id=? AND artifact_version=? AND kind=?
+		ORDER BY at DESC, rowid DESC LIMIT 1`,
+		string(taskID), artifactVersion, string(kind)).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	return value == 1, true, nil
 }
 
 // HasBlockingReview reports whether the LATEST review of this version blocks.

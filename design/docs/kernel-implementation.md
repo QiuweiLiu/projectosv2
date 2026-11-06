@@ -99,8 +99,19 @@ Kernel 不包含 Research 术语；`.project/` 仍是人类可读的权威摘要
   - **token 记账**：读取 `step_finish.part.tokens` 实测值，缺失才标注估算。
   - **macOS 原生外壳**：Objective-C + WKWebView，`desktop/build.sh` 产出 `.app`。
   - 174 项测试 + race + vet；真实目标、双目标切换、审批弹窗、diff、桌面 `--check` 已验证。
-- 尚未实现：SSE 推送、Windows/Linux 桌面壳、逐工具调用审批、二进制行级 diff、
-  取消与调度器完成的进程级交错、磁盘满/只读挂载、运行中 SQLite 失效。
+- **M1/M2 桌面工作台（2026-11-06）**：
+  - **M0**：`runNow` 只生成计划，不再隐式 confirm/run；Objective 级 acceptance 成为
+    completed 前的独立门禁；删除旧代码生成的 query-string SQLite 残留。
+  - **持久化聊天**：`conversations.db` 保存 Conversation/Message/Event；OpenCode 2.2.5
+    私有 v2 Server，Session 创建、续聊、history、interrupt。
+  - **SSE**：`session.text.delta` 实时，最终文本落库；工具 `permission.asked` →
+    `/chat` 批准一次/总是/拒绝；`after`/`Last-Event-ID` 重放。
+  - **`/chat` 工作台**：项目/对话、聊天、Objective/Task 三栏；桌面壳默认打开；工具卡片、
+    历史恢复、按项目过滤。
+  - **M3 最小**：Project catalog + 目标目录 `project.json` 归属；尚无项目级上下文共享。
+  - 188 项测试 + race + vet；真实聊天、工具权限、重启恢复、Objective acceptance 已验证。
+- 尚未实现：Cockpit 的 Kernel SSE、Windows/Linux 桌面壳、托管任务逐工具审批、
+  二进制行级 diff、取消/磁盘/SQLite 故障注入、Project 级 `.project` 上下文。
 
 ## 下一步
 

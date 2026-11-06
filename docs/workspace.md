@@ -64,3 +64,22 @@ kernel goal status --dir D/projects/obj-123
 - 一个项目目录内仍然不能放两个目标；这是 Kernel 的硬约束，不是 UI 限制。
 - Workspace 没有跨目标调度器；并行度由用户启动多少个 `goal run` 决定。
 - 删除项目目录等于删除该目标的全部状态；没有回收站。
+
+## Project 目录（M3 最小实现）
+
+Workspace 根有 `project-catalog.json`，每个目标目录有 `project.json`：
+
+```json
+// project-catalog.json
+{"projects":[{"id":"proj-default","name":"默认项目"},{"id":"proj-123","name":"GPU Scheduling"}]}
+// projects/obj-.../project.json
+{"id":"proj-123"}
+```
+
+- `GET/POST /api/projects` 读写目录；
+- `POST /api/goals` 可带 `projectId`；
+- `GET /api/objectives` 返回 `projectId`，聊天/驾驶舱可按项目过滤；
+- 旧目标没有 `project.json` 时归入 `proj-default`，不需要迁移。
+
+这只是**身份与归属**，还没有 Project 级 `.project/` 快照或跨 Objective 上下文共享；
+这些留到下一阶段，不能用 UI 假装已经存在。

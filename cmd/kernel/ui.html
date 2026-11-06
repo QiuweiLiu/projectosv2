@@ -170,6 +170,7 @@ details[open] summary::before{content:"▾ "}
     <div class="brand"><b><span class="dot"></span>ProjectOS</b><span class="pill plain" id="mode">…</span></div>
     <div class="objs" id="objs"><div class="empty" style="padding:0 .6rem">加载中…</div></div>
     <div class="newgoal hidden" id="newBtn">＋ 新目标</div>
+    <a class="newgoal" href="/chat" style="text-decoration:none;text-align:center">聊天工作台</a>
     <div class="sidefoot">
       <span id="refreshInfo">—</span>
       <form onsubmit="return false"><input id="token" type="password" placeholder="控制令牌（写操作需要）" autocomplete="off"></form>
@@ -197,6 +198,8 @@ details[open] summary::before{content:"▾ "}
               <button class="btn" id="btnPlan" disabled>生成计划</button>
               <button class="btn" id="btnConfirm" disabled>确认计划</button>
               <button class="btn primary" id="btnRun" disabled>开始执行</button>
+              <button class="btn" id="btnPause" disabled>暂停调度</button>
+              <button class="btn" id="btnResume" disabled>继续调度</button>
               <button class="btn" id="btnContinue" style="display:none">继续改进</button>
               <button class="btn danger" id="btnCancel" disabled>取消</button>
             </div>
@@ -420,6 +423,7 @@ function updateActions(d){
   const canWrite = state.control && !state.pending;
   const unplanned = !d.plan;
   const plan = $('btnPlan'), confirm = $('btnConfirm'), run = $('btnRun'), cancel = $('btnCancel');
+  const pause = $('btnPause'), resume = $('btnResume');
   plan.disabled = !(canWrite && unplanned && (s === 'draft' || s === 'planned'));
   confirm.disabled = !(canWrite && s === 'planned');
   run.disabled = !(canWrite && s === 'active' && (d.counts.pending > 0 || d.counts.running > 0));
@@ -428,6 +432,10 @@ function updateActions(d){
   show(plan, s === 'draft' || (s === 'planned' && unplanned));
   show(confirm, s === 'planned');
   show(run, s === 'active' && (d.counts.pending > 0 || d.counts.running > 0));
+  show(pause, s === 'active' && !d.pauseRequested);
+  show(resume, s === 'active' && !!d.pauseRequested);
+  pause.disabled = !canWrite;
+  resume.disabled = !canWrite;
   show(cancel, ['draft','planned','active','paused'].includes(s));
   show($('btnContinue'), canWrite && (s === 'completed' || s === 'failed'));
   const terminal = s === 'completed' || s === 'failed' || s === 'cancelled';
@@ -757,6 +765,8 @@ async function act(path, body){
 $('btnPlan').onclick = () => act('/api/objectives/' + encodeURIComponent(state.id) + '/plan');
 $('btnConfirm').onclick = () => act('/api/objectives/' + encodeURIComponent(state.id) + '/confirm');
 $('btnRun').onclick = () => openApproval();
+$('btnPause').onclick = () => act('/api/objectives/' + encodeURIComponent(state.id) + '/pause');
+$('btnResume').onclick = () => act('/api/objectives/' + encodeURIComponent(state.id) + '/unpause');
 $('approvalCancel').onclick = () => $('approval').classList.add('hidden');
 $('btnApproveRun').onclick = () => submitApproval();
 

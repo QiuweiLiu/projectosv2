@@ -24,8 +24,8 @@ open desktop/build/ProjectOS.app
 
 1. 使用 `~/Library/Application Support/ProjectOS/state` 作为 Workspace；
 2. 如果该目录没有活着的服务，启动 `kernel serve --control --daemon --addr 127.0.0.1:8799`；
-3. 读取 `control-token`，以 `#token=…` 打开驾驶舱（fragment 不发给服务器，页面存入
-   localStorage 后清除地址栏）；
+3. 读取 `control-token`，以 `#token=…` 打开 **`/chat` 聊天工作台**
+   （fragment 不发给服务器，页面存入 localStorage 后清除地址栏）；
 4. 关闭窗口时只停掉自己启动的 HTTP 客户端；已托管任务在独立会话里继续执行。
 
 ## 环境变量
@@ -49,4 +49,5 @@ desktop/build/ProjectOS.app/Contents/MacOS/ProjectOS --check
 - 只支持 macOS；Windows / Linux 外壳没有做。
 - 端口固定 8799；如果被别的程序占用，启动会失败并弹窗。
 - 窗口只是 WebView，没有原生菜单、托盘、通知或自动更新。
+- 聊天工作台的“任务”按钮回到 Cockpit；Kernel 的轮询页面仍可用。
 - 不签名/不公证；`build.sh` 只做 ad-hoc 签名，适合本机使用。

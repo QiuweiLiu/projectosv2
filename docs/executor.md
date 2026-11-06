@@ -33,3 +33,11 @@ Kernel 需要“用 OpenCode 里注册的模型”。AO 的 `opencode-v2` harnes
 - 或者要继续用 DeepSeek + AO 的既有链路。
 
 `--executor ao` 保留，行为不变。
+
+
+## 交互式聊天的执行器
+
+任务执行仍走 `opencode run --standalone`。交互式聊天不走这个 CLI 包装，而是由
+`internal/opencodeserver` 启动一个私有 `opencode serve`，使用 v2 Session API 和 SSE
+（详见 `docs/chat.md`）。它和任务执行器共享已注册的模型，但不共享 Task/Run 状态，
+也不使用 `--auto` 的 worker 权限模式。

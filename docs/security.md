@@ -69,3 +69,16 @@
   不会杀死已经在跑的进程。
 - 崩溃后遗留的 AO chat host 由下一次 `aoenv.Setup` 清理，清理前可能仍在跑。
 - 日志没有轮转，长期运行会持续增长。
+
+
+## 聊天（M1/M2）的额外边界
+
+- `conversations.db`（含聊天内容）以 0600 创建；不是 Kernel 任务库。
+- 聊天使用独立的私有 `opencode serve`，Basic 密码只在 Kernel 内存中，不写入前端。
+- 聊天 API 全部要求 `X-Kernel-Token`；SSE 也用请求头，不把 token 放在 URL。
+- 聊天 Session 权限规则为 `*: ask`：工具调用先产生 `permission.asked`，用户批准后才执行。
+- 聊天默认工作目录是 `<workspace>/chats/<conversation>`；关联 Objective 时使用项目目录，
+  因此写文件和命令仍然需要逐次批准。
+- 这不是 OS 级沙箱；批准后的命令以当前用户身份执行。
+- Kernel 的只读 API（目标、事件、diff、out 文件）仍默认无 token，但 `serve` 默认只绑定
+  回环地址；`--allow-remote` 会扩大暴露面，必须显式开启。

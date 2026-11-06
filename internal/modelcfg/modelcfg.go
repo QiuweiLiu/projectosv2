@@ -16,7 +16,7 @@ import (
 )
 
 // Roles are the model-backed parts of the system.
-var Roles = []string{"planner", "worker", "reviewer", "acceptance", "reporter"}
+var Roles = []string{"planner", "worker", "reviewer", "acceptance", "reporter", "chat"}
 
 type Settings struct {
 	Planner    string `json:"planner,omitempty"`
@@ -24,6 +24,7 @@ type Settings struct {
 	Reviewer   string `json:"reviewer,omitempty"`
 	Acceptance string `json:"acceptance,omitempty"`
 	Reporter   string `json:"reporter,omitempty"`
+	Chat       string `json:"chat,omitempty"`
 }
 
 type Cache struct {
@@ -77,6 +78,8 @@ func (s Settings) Set(role, model string) (Settings, error) {
 		s.Acceptance = model
 	case "reporter":
 		s.Reporter = model
+	case "chat":
+		s.Chat = model
 	default:
 		return s, fmt.Errorf("unknown role %q (want %s)", role, strings.Join(Roles, "|"))
 	}

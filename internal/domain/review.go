@@ -23,6 +23,7 @@ const (
 	ReviewFull       ReviewKind = "full"
 	ReviewTargeted   ReviewKind = "targeted"
 	ReviewAcceptance ReviewKind = "acceptance"
+	ReviewObjective  ReviewKind = "objective"
 )
 
 // Review is one reviewer pass bound to an exact artifact version. It can never

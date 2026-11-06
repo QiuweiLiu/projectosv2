@@ -24,18 +24,19 @@ import (
 type ValidatorFunc func(result string, deps map[domain.TaskID]string) error
 
 type Engine struct {
-	store         *store.Store
-	stateDir      string
-	sessionResume bool
-	backend       exec.Backend
-	maxWorkers    int
-	validators    map[string]ValidatorFunc
-	acceptance    Reviewer
-	budget        Budget
-	reviewer      Reviewer
-	runTimeout    time.Duration
-	observeErr    map[string]int
-	quarantine    string
+	store          *store.Store
+	stateDir       string
+	sessionResume  bool
+	backend        exec.Backend
+	maxWorkers     int
+	validators     map[string]ValidatorFunc
+	acceptance     Reviewer
+	objectiveJudge ObjectiveJudge
+	budget         Budget
+	reviewer       Reviewer
+	runTimeout     time.Duration
+	observeErr     map[string]int
+	quarantine     string
 }
 
 const quarantineKey = "quarantine"
@@ -63,6 +64,24 @@ type ReviewOutcome struct {
 // status; the Engine decides what a finding means.
 type Reviewer interface {
 	Review(ctx context.Context, req exec.ReviewRequest) (ReviewOutcome, error)
+}
+
+// ObjectiveReviewRequest is the goal-level question. Per-task acceptance asks
+// "did this artifact fulfil its task"; this asks "does the delivered set fulfil
+// the original objective". It is deliberately separate from the task reviewer.
+type ObjectiveReviewRequest struct {
+	ObjectiveID     string
+	Goal            string
+	ExpectedOutcome string
+	Acceptance      []string
+	TaskResults     map[string]string // artifact path -> accepted content
+	TaskSummary     []string
+}
+
+// ObjectiveJudge is optional. When configured, an objective is never completed
+// merely because every task passed; the goal-level judgment must also pass.
+type ObjectiveJudge interface {
+	JudgeObjective(ctx context.Context, req ObjectiveReviewRequest) (ReviewOutcome, error)
 }
 
 // observeErrorBudget is how many consecutive observe failures are tolerated
@@ -121,6 +140,11 @@ func (e *Engine) WithRunTimeout(d time.Duration) *Engine {
 // acceptance asks "did this actually accomplish the task?".
 func (e *Engine) WithAcceptance(r Reviewer) *Engine {
 	e.acceptance = r
+	return e
+}
+
+func (e *Engine) WithObjectiveJudge(j ObjectiveJudge) *Engine {
+	e.objectiveJudge = j
 	return e
 }
 

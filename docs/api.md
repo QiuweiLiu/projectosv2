@@ -44,15 +44,19 @@ kernel serve --dir D --stop                 # 停掉 HTTP 服务
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/goals` | `{goal,title,runNow,reviewer}`，创建目标；`runNow` 会串行执行 plan→confirm→run |
+| POST | `/api/goals` | `{goal,title,projectId,runNow}`；`runNow` 只生成计划，**不会**确认或执行 |
 | POST | `/api/objectives/{id}/confirm` | 确认当前草案计划 |
 | POST | `/api/objectives/{id}/run` | `{reviewer,approveRisk,maxRuns,maxReviews,maxTokens,runTimeout}`；高风险任务或命令校验需要 `approveRisk=true` |
 | POST | `/api/objectives/{id}/cancel` | `{reason}`，协作式取消 |
+| POST | `/api/objectives/{id}/pause` | 请求调度器暂停启动新任务；当前 Run 会继续完成 |
+| POST | `/api/objectives/{id}/unpause` | 移除暂停标记，调度器继续 |
 | POST | `/api/models` | `{role,model}` 保存一个角色；`{refresh:true}` 刷新模型列表（需 token） |
 | POST | `/api/objectives/{id}/report` | 让模型重写汇报（写入 `report.md`） |
 | POST | `/api/objectives/{id}/continue` | `{goal}`：在已完成/失败的目标上追加任务，生成新计划版本 |
 | POST | `/api/tasks/{id}/explain?objective=…` | 让汇报人把该任务的审查意见翻成中文（按 findings 哈希缓存） |
 | GET | `/api/jobs` | 各目标最近一次动作的状态（内存态，非权威） |
+| GET | `/api/projects` | Project 目录（默认项目 + 已创建项目） |
+| POST | `/api/projects` | `{name}` 创建 Project 元数据 |
 
 未带 token → 401；`--control` 未开启 → 403。
 
@@ -75,7 +79,29 @@ D/                           # Workspace 根
 - `goal create` 的 ID 使用纳秒时间戳，同一秒创建多个目标不会撞 ID。
 - `docs/workspace.md` 记录设计取舍与 CLI 用法。
 
-## 5. 验收的三层
+## 5. 对话与聊天（M1/M2）
+
+聊天使用 OpenCode v2 Server 的真实 Session；消息持久化在 Workspace 根目录的
+`conversations.db`，与 `kernel.db` 分离。普通聊天不会创建 Objective 或 Task。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/conversations` | 对话列表 + 最后一条消息 |
+| POST | `/api/conversations` | `{title,projectId,objectiveId,model}` 创建对话；可关联 Objective 以使用其目录 |
+| GET | `/api/conversations/{id}` | 对话 + 历史消息（分页上限 200） |
+| POST | `/api/conversations/{id}/messages` | `{text}` 发送；返回 202，回复通过 SSE 到达 |
+| POST | `/api/conversations/{id}/stop` | 中断当前 OpenCode 执行 |
+| POST | `/api/conversations/{id}/permissions/{requestId}` | `{decision: once|always|reject}` 批准工具调用 |
+| GET | `/api/conversations/{id}/events?after=N` | SSE：`id:` 为持久事件序号；`text_delta` 为实时增量，不持久化 |
+
+SSE 先回放 `after` 之后的持久事件，再推送实时事件；浏览器断线后可用
+`Last-Event-ID` 或 `after` 续传。`text_delta` 的 `seq` 为 0，最终文本由
+`assistant` 事件落库。
+
+聊天工具调用默认 `ask`：写文件、执行命令会触发 `permission.asked`，必须由用户
+批准；这不是 Kernel 托管任务的执行前审批，也不是沙箱。
+
+## 6. 验收的三层
 
 | 层 | 谁做 | 判断什么 |
 |---|---|---|
@@ -86,7 +112,7 @@ D/                           # Workspace 根
 acceptance 与 reviewer 是两次独立会话，结果都写 `reviews` 表（kind=`acceptance`），
 同版本各限一次。`--acceptance=false` 可关闭。
 
-## 6. 继续改进（continue）
+## 7. 继续改进（continue）
 
 已完成或失败的目标可以继续，但规则很硬：
 
@@ -96,7 +122,7 @@ acceptance 与 reviewer 是两次独立会话，结果都写 `reviews` 表（kin
 
 原因：已验收的成果是证据，继续改进意味着“在证据之上追加”，不是“重做一遍”。
 
-## 7. 取消的语义
+## 8. 取消的语义
 
 取消是**请求**，不是写：
 
@@ -109,7 +135,7 @@ acceptance 与 reviewer 是两次独立会话，结果都写 `reviews` 表（kin
 已经 `accepted` 的任务保持 accepted；已经 `completed` / `failed` 的目标不会被
 改写成 `cancelled`——取消不能重写已有结论。
 
-## 8. 单写者与恢复
+## 9. 单写者与恢复
 
 `store.Open` 在打开数据库的同时获取**该目标目录**的 `kernel.lock`。打开会执行恢复
 （running Run → unknown，running Task → blocked）。Workspace 的多个项目各有一把锁，
@@ -118,7 +144,7 @@ acceptance 与 reviewer 是两次独立会话，结果都写 `reviews` 表（kin
 - 读命令（`status/show/export/resume/serve`）使用只读打开，不触发恢复；
 - 第二个写进程会得到 `ErrLocked`，而不是在别人运行时改写状态。
 
-## 9. 界面（Cockpit）
+## 10. 界面（Cockpit）
 
 `GET /` 是 `cmd/kernel/ui.html`（`//go:embed`，无框架、无构建）。页面每 3s 轮询：
 
@@ -130,6 +156,9 @@ acceptance 与 reviewer 是两次独立会话，结果都写 `reviews` 表（kin
 - 时间线：`/api/events?objective=…&limit=100`；
 - 执行前审批：`/api/objectives/{id}` 带 `requiresApproval` / `approvalReasons`，前端弹窗。
 
+`GET /chat` 是聊天工作台（`cmd/kernel/chat.html`）：左侧项目/对话，中间聊天，
+右侧 Objective/Task。桌面壳默认打开 `/chat`，顶部“任务”回到 Cockpit。
+
 页面可以从 `#token=...` 读取控制令牌（fragment 不会发给服务器，仅用于本地打开演示链接），
 读入后存入 localStorage 并从地址栏移除。目标结束时若还没有汇报，页面会自动请求一次模型汇报。
 
@@ -139,10 +168,13 @@ acceptance 与 reviewer 是两次独立会话，结果都写 `reviews` 表（kin
 未确认的计划也会显示：detail 回退到最新 plan，并用 plan spec 合成 pending 节点做预览。
 写操作在 `--control` 关闭时不渲染。`serve` 在 `kernel.db` 不存在时先建空库，避免只读连接报 500。
 
-## 10. 尚未提供
+## 11. 尚未提供
 
-- 事件推送（SSE）；当前是轮询 + 游标。
+- Cockpit 的 Kernel 事件仍是轮询 + 游标；聊天已有 SSE，但 `/api/events` 尚未改成
+  长连接。
 - Windows / Linux 桌面外壳（当前只有 macOS 原生壳）。
-- 逐工具调用的审批拦截；当前是执行前审批（风险、命令、预算），不是沙箱。
+- Kernel 托管任务的逐工具审批；聊天已有工具级 `ask`，托管任务仍是执行前审批，
+  且 command 校验不是沙箱。
 - 产物二进制 diff；二进制只标记“有变化”，不给行级差异。
 - 取消与调度器完成的进程级并发交错、磁盘满/只读挂载、运行中 SQLite 失效没有专项注入。
+- Project 级 `.project/` 状态与跨 Objective 上下文共享；当前只有 Project 目录和归属映射。

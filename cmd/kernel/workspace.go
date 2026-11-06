@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,10 +29,21 @@ type workspace struct {
 
 // project is one objective plus the directory that owns it.
 type project struct {
-	ID  string
-	Dir string
-	Obj goal.Objective
+	ID        string
+	ProjectID string
+	Dir       string
+	Obj       goal.Objective
 }
+
+// ProjectInfo is the lightweight project identity above objectives. It is kept
+// in a workspace catalog; objective state stays in its own kernel.db.
+type ProjectInfo struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+const defaultProjectID = "proj-default"
 
 func newWorkspace(root string) *workspace { return &workspace{root: root} }
 
@@ -72,6 +84,7 @@ func (w *workspace) list() ([]project, error) {
 	out := make([]project, 0, 8)
 	seen := map[string]bool{}
 	for _, dir := range w.projectDirs() {
+		meta := readProjectMeta(dir)
 		st, err := store.OpenReadOnly(filepath.Join(dir, "kernel.db"))
 		if err != nil {
 			continue
@@ -86,7 +99,7 @@ func (w *workspace) list() ([]project, error) {
 				continue
 			}
 			seen[obj.ID] = true
-			out = append(out, project{ID: obj.ID, Dir: dir, Obj: obj})
+			out = append(out, project{ID: obj.ID, ProjectID: meta, Dir: dir, Obj: obj})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -118,7 +131,7 @@ func (w *workspace) find(id string) (project, bool, error) {
 	}
 	if dir := filepath.Join(w.projectsDir(), id); fileExists(filepath.Join(dir, "kernel.db")) {
 		if obj, ok, err := readObjective(dir, id); err == nil && ok {
-			return project{ID: id, Dir: dir, Obj: obj}, true, nil
+			return project{ID: id, ProjectID: readProjectMeta(dir), Dir: dir, Obj: obj}, true, nil
 		}
 	}
 	all, err := w.list()
@@ -204,4 +217,94 @@ func readObjective(dir, id string) (goal.Objective, bool, error) {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func (w *workspace) catalogPath() string { return filepath.Join(w.root, "project-catalog.json") }
+
+func readProjectMeta(dir string) string {
+	raw, err := os.ReadFile(filepath.Join(dir, "project.json"))
+	if err != nil {
+		return defaultProjectID
+	}
+	var meta struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(raw, &meta) != nil || strings.TrimSpace(meta.ID) == "" {
+		return defaultProjectID
+	}
+	return meta.ID
+}
+
+func writeProjectMeta(dir, id string) error {
+	if strings.TrimSpace(id) == "" {
+		id = defaultProjectID
+	}
+	raw, err := json.MarshalIndent(map[string]string{"id": id}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "project.json"), append(raw, '\n'), 0o644)
+}
+
+// Projects returns the catalog. The default project exists implicitly so an
+// existing workspace does not need a migration before it can be used.
+func (w *workspace) Projects() ([]ProjectInfo, error) {
+	raw, err := os.ReadFile(w.catalogPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []ProjectInfo{{ID: defaultProjectID, Name: "默认项目"}}, nil
+		}
+		return nil, err
+	}
+	var cat struct {
+		Projects []ProjectInfo `json:"projects"`
+	}
+	if err := json.Unmarshal(raw, &cat); err != nil {
+		return nil, err
+	}
+	seen := false
+	for _, p := range cat.Projects {
+		if p.ID == defaultProjectID {
+			seen = true
+		}
+	}
+	if !seen {
+		cat.Projects = append([]ProjectInfo{{ID: defaultProjectID, Name: "默认项目"}}, cat.Projects...)
+	}
+	return cat.Projects, nil
+}
+
+func (w *workspace) CreateProject(name string) (ProjectInfo, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ProjectInfo{}, fmt.Errorf("project name is required")
+	}
+	list, err := w.Projects()
+	if err != nil {
+		return ProjectInfo{}, err
+	}
+	info := ProjectInfo{ID: fmt.Sprintf("proj-%d", time.Now().UnixNano()), Name: name, CreatedAt: time.Now().UTC()}
+	list = append(list, info)
+	raw, err := json.MarshalIndent(map[string]any{"projects": list}, "", "  ")
+	if err != nil {
+		return ProjectInfo{}, err
+	}
+	tmp := w.catalogPath() + ".tmp"
+	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
+		return ProjectInfo{}, err
+	}
+	return info, os.Rename(tmp, w.catalogPath())
+}
+
+func (w *workspace) FindProject(id string) (ProjectInfo, bool, error) {
+	list, err := w.Projects()
+	if err != nil {
+		return ProjectInfo{}, false, err
+	}
+	for _, p := range list {
+		if p.ID == id {
+			return p, true, nil
+		}
+	}
+	return ProjectInfo{}, false, nil
 }

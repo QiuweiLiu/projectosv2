@@ -19,6 +19,7 @@ import (
 // an agent's self-report.
 type objectiveSummary struct {
 	ID          string     `json:"id"`
+	ProjectID   string     `json:"projectId,omitempty"`
 	Title       string     `json:"title,omitempty"`
 	Goal        string     `json:"goal"`
 	Status      string     `json:"status"`
@@ -62,8 +63,9 @@ func summarise(st *store.Store, obj goal.Objective) (objectiveSummary, error) {
 		return objectiveSummary{}, err
 	}
 	return objectiveSummary{
-		ID: obj.ID, Title: obj.Title, Goal: obj.Goal, Status: string(obj.Status),
-		PlanVersion: obj.PlanVersion, Tasks: countTasks(tasks), UpdatedAt: obj.UpdatedAt,
+		ID: obj.ID, ProjectID: readProjectMeta(filepath.Dir(obj.ProjectPath)), Title: obj.Title,
+		Goal: obj.Goal, Status: string(obj.Status), PlanVersion: obj.PlanVersion,
+		Tasks: countTasks(tasks), UpdatedAt: obj.UpdatedAt,
 	}, nil
 }
 
@@ -102,18 +104,20 @@ type objectiveTaskRow struct {
 }
 
 type objectiveDetail struct {
-	Objective        goal.Objective     `json:"objective"`
-	Plan             *goal.Plan         `json:"plan,omitempty"`
-	PlanVersion      int                `json:"planVersion"`
-	Plans            []planRow          `json:"plans,omitempty"`
-	PlanHash         string             `json:"planHash,omitempty"`
-	PlanStatus       string             `json:"planStatus,omitempty"`
-	Tasks            []objectiveTaskRow `json:"tasks"`
-	Counts           taskCounts         `json:"counts"`
-	Delivery         bool               `json:"delivery"`
-	CancelRequested  bool               `json:"cancelRequested"`
-	RequiresApproval bool               `json:"requiresApproval"`
-	ApprovalReasons  []string           `json:"approvalReasons,omitempty"`
+	Objective         goal.Objective     `json:"objective"`
+	Plan              *goal.Plan         `json:"plan,omitempty"`
+	PlanVersion       int                `json:"planVersion"`
+	Plans             []planRow          `json:"plans,omitempty"`
+	PlanHash          string             `json:"planHash,omitempty"`
+	PlanStatus        string             `json:"planStatus,omitempty"`
+	Tasks             []objectiveTaskRow `json:"tasks"`
+	Counts            taskCounts         `json:"counts"`
+	Delivery          bool               `json:"delivery"`
+	CancelRequested   bool               `json:"cancelRequested"`
+	PauseRequested    bool               `json:"pauseRequested"`
+	RequiresApproval  bool               `json:"requiresApproval"`
+	ApprovalReasons   []string           `json:"approvalReasons,omitempty"`
+	ObjectiveFindings []domain.Finding   `json:"objectiveFindings,omitempty"`
 }
 
 type planRow struct {
@@ -239,9 +243,18 @@ func serveObjectiveDetail(w http.ResponseWriter, st *store.Store, dir, id string
 		}
 	}
 	detail.CancelRequested = cancelRequested(dir)
+	detail.PauseRequested = pauseRequested(dir)
 	if ok && len(record.Spec.Tasks) > 0 {
 		detail.ApprovalReasons = approvalReasons(record.Spec)
 		detail.RequiresApproval = len(detail.ApprovalReasons) > 0
+	}
+	if reviews, err := st.ReviewsFor(domain.TaskID("objective:" + obj.ID)); err == nil {
+		for i := len(reviews) - 1; i >= 0; i-- {
+			if reviews[i].Kind == domain.ReviewObjective {
+				detail.ObjectiveFindings = reviews[i].Findings
+				break
+			}
+		}
 	}
 
 	// History is shown, not hidden: after a replan the current plan alone makes

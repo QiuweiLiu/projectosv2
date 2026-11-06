@@ -1,22 +1,21 @@
 # Plan
 
 ## Now
-P2 可用性已交付：多目标 Workspace、执行前审批、文本 diff、会话续跑、work 清理、token 实测、
-macOS 原生壳。接下来验证真实使用，不再扩功能面。
+M1/M2 已交付：持久化聊天、OpenCode v2 Session/SSE、工具审批、`/chat` 工作台；
+M0 正确性门禁已修；M3 只做了 Project 归属映射。
 
 ## Steps
-1. 用 Workspace 并行跑 2–3 个真实目标（含一次失败/重试），记录审批摩擦、diff 可读性、
-   acceptance 误伤与汇报质量。
-2. 优先修计划质量（产物引用、任务拆分），而不是继续加界面。
-3. 视需要做 SSE；不做 Windows/Linux 与逐工具审批。
-4. 决定 AO 去留：装 tmux 试 v1，或删除 AO 路径与依赖。
+1. 在 `/chat` 关联真实 Objective，跑完“聊天 → 转托管 → 计划 → 执行 → 交付”闭环。
+2. 决定是否补 pause/resume 与 Project 级 `.project` 共享上下文。
+3. 把 Cockpit 时间线切到 `/api/events/stream`；给聊天消息加保留策略。
+4. 只有在真实使用暴露问题后，才扩展 UI/并发/多设备。
 
 ## Acceptance
-- 真实目标全部走默认执行器，不需要回退 AO。
-- 审批弹窗不成为每次执行的纯摩擦；高风险/命令能正确拦住。
-- diff 能解释“这次改了什么”，而不是只显示“相同/不同”。
-- `<state>/work/` 不会无限增长。
-- 未修项写进 HANDOFF 的 Open，不用“以后再说”。
+- 聊天不产生 Objective；转托管必须人工确认计划。
+- 关闭/重开桌面后历史、Session、Objective/Task 状态一致。
+- 工具调用默认 ask，批准只对本次请求生效。
+- `runNow` 不绕过确认；Objective acceptance 阻断时不交付。
+- 现有 CLI、Workspace、188 测试保持兼容。
 
 ## Not now
-多机、Windows/Linux、逐工具调用审批、二进制行级 diff、日志轮转。
+Windows/Linux、逐工具托管任务审批、Project 级复杂调度、多设备同步、日志轮转。

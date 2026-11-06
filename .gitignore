@@ -24,3 +24,6 @@ github_token
 __pycache__/
 .venv/
 node_modules/
+
+# stale artifact from store.Open("") before the empty-path guard
+*_pragma=*

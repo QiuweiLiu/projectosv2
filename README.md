@@ -24,9 +24,11 @@ P2 可用性已完成并验证：
 - 执行前审批：高风险任务与 command 校验需要显式批准；
 - 文本产物 diff、会话续跑、work 保留策略；
 - token 优先使用 provider 实测值；
-- macOS 原生外壳（非 Electron）。
+- **持久化聊天工作台**：OpenCode v2 Session、SSE 流、工具级 ask 审批、历史恢复；
+- Project / Objective 目录与归属映射；
+- macOS 原生外壳（非 Electron），默认打开 `/chat`。
 
-174 项 Go 测试 + `-race` + `vet` 全绿。边界与未实现项见 `docs/api.md` 第 10 节和
+188 项 Go 测试 + `-race` + `vet` 全绿。边界与未实现项见 `docs/api.md` 第 11 节和
 `.project/HANDOFF.md`。
 
 ## 快速开始
@@ -41,8 +43,9 @@ go build -o bin/kernel ./cmd/kernel
 ./bin/kernel goal confirm --dir /tmp/demo
 ./bin/kernel goal run    --dir /tmp/demo --reviewer --approve-risk
 
-# 多目标驾驶舱
+# 多目标驾驶舱 + 聊天
 ./bin/kernel serve --dir ~/ProjectOS --control --daemon
+# 浏览器打开输出地址；聊天在 /chat
 ```
 
 `goal run` 需要能访问已注册的 OpenCode provider/model；模型配置见 `docs/models.md`。
@@ -60,6 +63,7 @@ open desktop/build/ProjectOS.app
 ## 文档入口
 
 - `docs/api.md`：本地 API、Workspace、验收与边界
+- `docs/chat.md`：聊天、Session、SSE 与工具权限
 - `docs/workspace.md`：多目标设计
 - `docs/approval.md`：执行前审批的准确范围
 - `docs/desktop.md`：原生外壳构建与行为
