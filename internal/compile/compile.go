@@ -86,6 +86,20 @@ func prompt(t goal.PlanTask) string {
 	if len(t.Acceptance) > 0 {
 		b.WriteString("\nAcceptance criteria: " + strings.Join(t.Acceptance, "; "))
 	}
+	// The worker must see the exact machine checks. Otherwise a contains/exact
+	// validator can require a symbol the prompt never mentions.
+	for _, v := range t.Validators {
+		switch v.Type {
+		case "exact":
+			b.WriteString("\nMachine check: the artifact must equal exactly: " + v.Expect)
+		case "contains":
+			b.WriteString("\nMachine check: the artifact must contain: " + v.Expect)
+		case "nonempty":
+			b.WriteString("\nMachine check: the artifact must be non-empty")
+		case "command":
+			b.WriteString("\nMachine check: this command must exit 0: " + v.Command)
+		}
+	}
 	if len(t.Allowed) > 0 {
 		b.WriteString("\nAllowed: " + strings.Join(t.Allowed, "; "))
 	}

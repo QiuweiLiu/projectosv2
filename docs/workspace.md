@@ -111,3 +111,11 @@ kernel project decision --dir D --project proj-... --text "采用 baseline B"
 `kernel project context --dir D --project P` 输出有界上下文（已验证事实、产物内容、
 显式决策、活跃目标、阻塞），聊天首条消息和 Planner 的 `--context` 使用同一份内容。
 注入内容明确标记为数据，不把模型推测写成项目事实。
+
+
+## 跨 Objective 只读产物
+
+`project-state/<projectID>/artifacts/<objectiveID>/<path>` 保存已交付产物的只读副本。
+新 Objective 启动时会把该目录复制到任务种子的 `repo/project-artifacts/`，worker 可以
+直接读取；Planner/聊天上下文同时列出这些路径。副本有大小上限，符号链接跳过；各
+Objective 以 ID 分目录，不能互相覆盖。它仍是派生数据，数据库/交付目录才是权威。

@@ -23,6 +23,7 @@ import (
 	"projectos/kernel/internal/goal"
 	"projectos/kernel/internal/modelcfg"
 	"projectos/kernel/internal/planner"
+	"projectos/kernel/internal/progress"
 	"projectos/kernel/internal/projectstate"
 	"projectos/kernel/internal/replan"
 	"projectos/kernel/internal/report"
@@ -100,7 +101,7 @@ func resolveRoleModel(dir, role, explicit string) string {
 
 func cmdGoal(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: kernel goal <create|plan|show|confirm|run|status|export|resume|cancel|pause|unpause|report|explain|continue|models|prune> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: kernel goal <create|plan|show|confirm|run|status|progress|export|resume|cancel|pause|unpause|report|explain|continue|models|prune> [flags]")
 		return exitError
 	}
 	switch args[0] {
@@ -116,6 +117,8 @@ func cmdGoal(args []string) int {
 		return goalRun(args[1:])
 	case "status":
 		return goalStatus(args[1:])
+	case "progress":
+		return goalProgress(args[1:])
 	case "export":
 		return goalExport(args[1:])
 	case "resume":
@@ -553,6 +556,10 @@ func goalRun(args []string) int {
 	// written while that scheduler owned the dir, and we own it now.
 	_ = os.Remove(cancelPath(*dir))
 	_ = os.Remove(pausePath(*dir))
+	// Make accepted artifacts from sibling objectives available as a read-only
+	// project namespace. Failure here is a context convenience, not a reason to
+	// block the objective.
+	_ = seedProjectArtifacts(*dir)
 	// Role backends share the workspace root; for AO they also share the daemon.
 	roleBackend := func(model string) exec.Backend {
 		if *executor == "opencode" {
@@ -899,6 +906,40 @@ func failGoal(st *store.Store, obj goal.Objective, tasks []domain.Task) int {
 	_ = st.MoveObjective(obj.ID, goal.StatusFailed)
 	fmt.Println("objective failed; see blocked reasons above")
 	return exitBlocked
+}
+
+func goalProgress(args []string) int {
+	fs := flag.NewFlagSet("goal progress", flag.ContinueOnError)
+	dir := fs.String("dir", "", "state directory")
+	if err := fs.Parse(args); err != nil {
+		return exitError
+	}
+	st, err := openGoalStoreRead(*dir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "store:", err)
+		return exitError
+	}
+	defer st.Close()
+	obj, ok, err := singleObjective(st)
+	if err != nil || !ok {
+		fmt.Fprintln(os.Stderr, "no objective in this state dir")
+		return exitError
+	}
+	plan, ok, err := st.GetPlan(obj.ID, obj.PlanVersion)
+	if err != nil || !ok {
+		fmt.Println("no confirmed plan")
+		return exitOK
+	}
+	r, err := progress.Assess(st, obj, len(approvalReasons(plan.Spec)) > 0)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "progress:", err)
+		return exitError
+	}
+	fmt.Println(r)
+	if r.FailureClass != "" {
+		fmt.Printf("failure=%s action=%s\n", r.FailureClass, r.SuggestedAction)
+	}
+	return exitOK
 }
 
 func goalStatus(args []string) int {

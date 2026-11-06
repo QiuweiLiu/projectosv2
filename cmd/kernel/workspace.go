@@ -319,7 +319,62 @@ func (w *workspace) ProjectSnapshot(id string) (projectstate.ProjectSnapshot, er
 	if err := projectstate.WriteProject(w.root, snap); err != nil {
 		return projectstate.ProjectSnapshot{}, err
 	}
+	w.invalidate()
+	all, err := w.list()
+	if err != nil {
+		return projectstate.ProjectSnapshot{}, err
+	}
+	if err := w.copyProjectArtifacts(id, all); err != nil {
+		return projectstate.ProjectSnapshot{}, err
+	}
 	return snap, nil
+}
+
+func (w *workspace) copyProjectArtifacts(projectID string, projects []project) error {
+	root := filepath.Join(w.root, "project-state", projectID, "artifacts")
+	var total int64
+	for _, p := range projects {
+		if p.ProjectID != projectID {
+			continue
+		}
+		out := filepath.Join(p.Dir, "out")
+		err := filepath.WalkDir(out, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+				return nil
+			}
+			info, err := entry.Info()
+			if err != nil || !info.Mode().IsRegular() || info.Size() > 5<<20 {
+				return nil
+			}
+			if total+info.Size() > 20<<20 {
+				return filepath.SkipDir
+			}
+			rel, err := filepath.Rel(out, path)
+			if err != nil || strings.HasPrefix(rel, "..") {
+				return nil
+			}
+			dst := filepath.Join(root, p.Obj.ID, rel)
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				return err
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+			if err := os.WriteFile(dst, raw, 0o644); err != nil {
+				return err
+			}
+			total += info.Size()
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // BuildProjectSnapshot is the read-only form: it rebuilds facts without touching
@@ -446,6 +501,23 @@ func (w *workspace) ProjectContextText(id string) string {
 		st.Close()
 	}
 	if shown == 0 {
+		b.WriteString("- none yet\n")
+	}
+	b.WriteString("\nRead-only shared artifacts (project-artifacts/<objective>/<path>):\n")
+	sharedRoot := filepath.Join(w.root, "project-state", id, "artifacts")
+	sharedCount := 0
+	_ = filepath.WalkDir(sharedRoot, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || sharedCount >= 20 {
+			return nil
+		}
+		rel, err := filepath.Rel(sharedRoot, path)
+		if err == nil && !strings.HasPrefix(rel, "..") {
+			fmt.Fprintf(&b, "- project-artifacts/%s\n", filepath.ToSlash(rel))
+			sharedCount++
+		}
+		return nil
+	})
+	if sharedCount == 0 {
 		b.WriteString("- none yet\n")
 	}
 	b.WriteString("\nExplicit user decisions:\n")

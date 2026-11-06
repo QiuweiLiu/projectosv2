@@ -1,12 +1,12 @@
 # State
 
 ## Stage
-P3.0-P3.2 完成：Objective Acceptance 指纹、Conversation remote-id 同步、SSE 分页/resync、
-多轮对话 Goal Handoff、Project Context 注入聊天/Planner。P3.3-P3.5 只做最小部分。
-Kernel 仍是 Task/Run 唯一写者；单机、单用户、多目标 Workspace + Project。
+P3 + P4 最小完成：验收缓存、remote-id 同步、SSE resync、Goal Handoff、Project Context；
+P4 增加计划机器检查进 prompt、权限补拉、跨 Objective 共享产物、确定性 Progress、
+Objective metrics。P3.3 智能干预/P3.5 重故障注入仍部分。Kernel 仍是唯一 Task/Run 权威。
 
 ## Verified
-- **206 项测试 + `-race` + `vet` 全绿**；真实运行后无残留进程。
+- **213 项测试 + `-race` + `vet` 全绿**；真实运行后无残留进程。
 - **场景 A**：待办应用 3 任务，`node test.js` 验收，`out/` 组装后 11–14 项测试通过。
 - **场景 B**：sales.csv → summarize.js → summary.md，总额 60（一次通过，0 阻断）。
 - **场景 C**：真实模型重规划（T1 失败 → T1-fix → 完成）。

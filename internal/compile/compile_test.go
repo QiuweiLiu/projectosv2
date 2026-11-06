@@ -42,3 +42,19 @@ func TestValidatorsAreCompiledAndCombined(t *testing.T) {
 		t.Fatal("41 must fail")
 	}
 }
+
+func TestPromptIncludesMachineChecks(t *testing.T) {
+	p := goal.Plan{Tasks: []goal.PlanTask{{
+		ID: "T1", Goal: "write a.py", Artifacts: []string{"a.py"},
+		Validators: []verify.Spec{{Type: "contains", Expect: "def add_task"}, {Type: "command", Command: "python3 -m unittest"}},
+	}}}
+	tasks := compile.Tasks(p, "obj-1", 1)
+	if len(tasks) != 1 {
+		t.Fatal(tasks)
+	}
+	for _, want := range []string{"must contain: def add_task", "command must exit 0: python3 -m unittest"} {
+		if !strings.Contains(tasks[0].Prompt, want) {
+			t.Fatalf("prompt missing %q: %s", want, tasks[0].Prompt)
+		}
+	}
+}

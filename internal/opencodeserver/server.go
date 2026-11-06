@@ -65,6 +65,14 @@ type Message struct {
 	} `json:"tokens"`
 }
 
+type PermissionRequest struct {
+	ID        string   `json:"id"`
+	SessionID string   `json:"sessionID"`
+	Action    string   `json:"action"`
+	Resources []string `json:"resources"`
+	Message   string   `json:"message"`
+}
+
 type Event struct {
 	ID      string          `json:"id"`
 	Created int64           `json:"created"`
@@ -343,6 +351,14 @@ func (s *Server) Messages(ctx context.Context, sessionID string, limit int) ([]M
 	}
 	err := s.doJSON(ctx, http.MethodGet,
 		fmt.Sprintf("/api/session/%s/message?limit=%d", url.PathEscape(sessionID), limit), nil, &out)
+	return out.Data, err
+}
+
+func (s *Server) PendingPermissions(ctx context.Context) ([]PermissionRequest, error) {
+	var out struct {
+		Data []PermissionRequest `json:"data"`
+	}
+	err := s.doJSON(ctx, http.MethodGet, "/api/permission/request", nil, &out)
 	return out.Data, err
 }
 

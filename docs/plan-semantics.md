@@ -43,3 +43,13 @@
 `goal pause` / `POST /api/objectives/{id}/pause` 只对**正在运行的调度器**生效：
 它停止启动新任务，当前 Run 允许完成；`unpause` 移除标记。没有调度器时暂停请求不会
 留下陈旧标记，`goal run` 启动时也会清理旧标记。
+
+
+## 机器检查进入 worker prompt
+
+`exact` / `contains` / `command` 不再只存在于 Kernel 校验器：`compile.prompt` 会把
+“必须等于/必须包含/命令必须退出 0”写进 worker 提示词。这样可以避免 Planner 要求
+`def add_task`、worker 却完全不知道这个约束。
+
+Planner 也被要求：除非目标明确点名，不要用 exact/contains 断言内部函数/类名；优先用
+command 验证行为。Prompt 规则不替代校验器，只是减少计划与产物语义错位。

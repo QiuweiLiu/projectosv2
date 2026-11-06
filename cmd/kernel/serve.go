@@ -664,6 +664,22 @@ func buildMux(ws *workspace, control bool, chatMgr *chat.Manager) (*http.ServeMu
 			return
 		}
 		switch {
+		case r.Method == http.MethodGet && action == "metrics":
+			st, _, err := ws.open(id)
+			if err != nil {
+				http.Error(w, "unknown objective", http.StatusNotFound)
+				return
+			}
+			defer st.Close()
+			serveMetrics(w, st)
+		case r.Method == http.MethodGet && action == "progress":
+			st, _, err := ws.open(id)
+			if err != nil {
+				http.Error(w, "unknown objective", http.StatusNotFound)
+				return
+			}
+			defer st.Close()
+			serveProgress(w, st, id)
 		case r.Method == http.MethodGet && action == "":
 			st, p, err := ws.open(id)
 			if err != nil {

@@ -215,3 +215,24 @@ func TestGoalDraftLifecycle(t *testing.T) {
 		t.Fatalf("conversation = %+v %v %v", conv, ok, err)
 	}
 }
+
+func TestPermissionEventDeduplication(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "conversations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	c, err := st.Create("perm", "", "", "/tmp/chat", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AppendEvent(c.ID, "permission", map[string]string{"requestId": "per_123"}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := st.HasPermissionEvent(c.ID, "per_123"); err != nil || !ok {
+		t.Fatalf("seen = %v %v", ok, err)
+	}
+	if ok, err := st.HasPermissionEvent(c.ID, "per_other"); err != nil || ok {
+		t.Fatalf("other = %v %v", ok, err)
+	}
+}

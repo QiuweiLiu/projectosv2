@@ -10,6 +10,7 @@ import (
 	"projectos/kernel/internal/domain"
 	"projectos/kernel/internal/goal"
 	"projectos/kernel/internal/modelcfg"
+	"projectos/kernel/internal/progress"
 	"projectos/kernel/internal/report"
 	"projectos/kernel/internal/store"
 )
@@ -266,6 +267,33 @@ func serveObjectiveDetail(w http.ResponseWriter, st *store.Store, dir, id string
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = writeJSON(w, detail)
+}
+
+func serveMetrics(w http.ResponseWriter, st *store.Store) {
+	m, err := st.Metrics()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_ = writeJSON(w, m)
+}
+
+func serveProgress(w http.ResponseWriter, st *store.Store, id string) {
+	obj, ok, err := st.GetObjective(id)
+	if err != nil || !ok {
+		http.Error(w, "unknown objective", http.StatusNotFound)
+		return
+	}
+	needs := false
+	if plan, ok, err := st.GetPlan(obj.ID, obj.PlanVersion); err == nil && ok {
+		needs = len(approvalReasons(plan.Spec)) > 0
+	}
+	r, err := progress.Assess(st, obj, needs)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_ = writeJSON(w, r)
 }
 
 func deliveryPresent(dir string) bool {

@@ -1,5 +1,5 @@
 # Handoff
-Status: p3_0_p3_2（验收缓存/消息同步/SSE/Goal Handoff/Project Context）
+Status: p4_min（机器检查/权限补拉/共享产物/Progress/Metrics）
 
 ## Goal
 在现有 Go Kernel 上增加桌面 AI 工作台：普通聊天与长期托管任务分离；
@@ -18,11 +18,13 @@ Status: p3_0_p3_2（验收缓存/消息同步/SSE/Goal Handoff/Project Context�
 - **P3.1**：多轮对话 Goal Draft（来源/context version）→ 编辑确认 → Objective → Plan；
   notes 目标真实 handoff→执行→验收→交付完成。
 - **P3.2**：Project Context Builder 注入聊天首条消息与 Planner `--context`；项目快照回写。
+- **P4**：机器检查进入 worker prompt；权限 pending 重启补拉；跨 Objective `project-artifacts/`
+  共享；`goal progress`/`/progress` 确定性下一动作；`/metrics` 任务/token/耗时。
 - 聊天转托管：`/api/goals` + `/api/objectives/{id}/plan`，不自动执行。
 - 任务侧保留 P2：Workspace、多目标、审批、diff、`--session`、work prune、token 实测。
 
 ## Verified
-- 206 项 Go 测试 + `-race` + `vet` 全绿。
+- 213 项 Go 测试 + `-race` + `vet` 全绿。
 - 真实 OpenCode：3 轮聊天、SSE delta、工具写文件 + permission once 批准；
   serve 重启后历史与 Session 恢复；`/api/objectives` 始终为空。
 - 真实托管目标：planner → worker → reviewer → acceptance → **objective acceptance**

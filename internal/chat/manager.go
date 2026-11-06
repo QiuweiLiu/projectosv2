@@ -113,6 +113,7 @@ func (m *Manager) Get(ctx context.Context, id string, limit int, before string) 
 	// Best-effort resync when the app was closed while a reply was in flight.
 	if c.SessionID != "" {
 		_ = m.Sync(ctx, c)
+		go m.reconcilePermissions()
 	}
 	msgs, err := m.store.Messages(id, limit, before)
 	return c, msgs, err
@@ -169,6 +170,7 @@ func (m *Manager) ensureServer(ctx context.Context) (*opencodeserver.Server, err
 	m.loadSessions()
 	go m.eventLoop()
 	go m.resyncAll()
+	go m.reconcilePermissions()
 	return s, nil
 }
 
@@ -454,6 +456,7 @@ func (m *Manager) eventLoop() {
 		stream.Close()
 		// Events missed while disconnected are repaired by Sync on next open.
 		go m.resyncAll()
+		go m.reconcilePermissions()
 		time.Sleep(time.Second)
 	}
 }
@@ -605,6 +608,34 @@ func (m *Manager) Sync(ctx context.Context, c conversation.Conversation) error {
 		}
 	}
 	return nil
+}
+
+func (m *Manager) reconcilePermissions() {
+	srv := m.currentServer()
+	if srv == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(m.ctx, 10*time.Second)
+	defer cancel()
+	requests, err := srv.PendingPermissions(ctx)
+	if err != nil {
+		return
+	}
+	for _, req := range requests {
+		m.mu.Lock()
+		conversationID := m.sessions[req.SessionID]
+		m.mu.Unlock()
+		if conversationID == "" {
+			continue
+		}
+		seen, err := m.store.HasPermissionEvent(conversationID, req.ID)
+		if err != nil || seen {
+			continue
+		}
+		_, _ = m.persist(conversationID, "permission", map[string]any{
+			"requestId": req.ID, "action": req.Action, "resources": req.Resources, "message": req.Message,
+		})
+	}
 }
 
 func (m *Manager) resyncAll() {

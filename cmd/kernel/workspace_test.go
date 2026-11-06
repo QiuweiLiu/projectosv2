@@ -196,6 +196,12 @@ func TestProjectSnapshotBuildsFromObjectiveDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	st.Close()
+	if err := os.MkdirAll(filepath.Join(dir, "out"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "out", "a.txt"), []byte("done"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := ws.appendProjectDecision(project.ID, "use baseline B"); err != nil {
 		t.Fatal(err)
 	}
@@ -211,6 +217,10 @@ func TestProjectSnapshotBuildsFromObjectiveDB(t *testing.T) {
 	}
 	if len(snap.Decisions) != 1 || snap.Decisions[0] != "use baseline B" {
 		t.Fatalf("decisions = %+v", snap.Decisions)
+	}
+	shared, err := os.ReadFile(filepath.Join(root, "project-state", project.ID, "artifacts", "obj-a", "a.txt"))
+	if err != nil || string(shared) != "done" {
+		t.Fatalf("shared artifact = %q %v", shared, err)
 	}
 	for _, name := range []string{"PROJECT.md", "STATE.md", "HANDOFF.md", "DECISIONS.md", "snapshot.json"} {
 		if _, err := os.Stat(filepath.Join(projectstate.ProjectDir(root, project.ID), name)); err != nil {
@@ -265,5 +275,30 @@ func TestProjectAPIExposesAndRefreshesSnapshot(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join(projectstate.ProjectDir(root, project.ID), "DECISIONS.md"))
 	if err != nil || !strings.Contains(string(raw), "use baseline B") {
 		t.Fatalf("decisions = %s %v", raw, err)
+	}
+}
+
+func TestSeedProjectArtifacts(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "projects", "obj-b")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "project.json"), []byte(`{"id":"proj-1"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shared := filepath.Join(root, "project-state", "proj-1", "artifacts", "obj-a")
+	if err := os.MkdirAll(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(shared, "hello.txt"), []byte("hello world"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := seedProjectArtifacts(dir); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "repo", "project-artifacts", "obj-a", "hello.txt"))
+	if err != nil || string(raw) != "hello world" {
+		t.Fatalf("seeded = %q %v", raw, err)
 	}
 }

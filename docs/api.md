@@ -58,6 +58,8 @@ kernel serve --dir D --stop                 # 停掉 HTTP 服务
 | GET | `/api/projects` | Project 目录（默认项目 + 已创建项目） |
 | POST | `/api/projects` | `{name,description}` 创建 Project 元数据 |
 | GET | `/api/projects/{id}` | 重建并返回项目级 `.project` 快照 |
+| GET | `/api/objectives/{id}/progress` | 确定性下一动作/阻塞分类（不调用模型） |
+| GET | `/api/objectives/{id}/metrics` | 任务/运行/审查/token/耗时指标 |
 | POST | `/api/projects/{id}/refresh` | 强制重建项目快照 |
 | POST | `/api/projects/{id}/decisions` | `{text}` 追加项目级决策并刷新 |
 

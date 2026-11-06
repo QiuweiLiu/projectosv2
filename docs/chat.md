@@ -41,6 +41,9 @@ user/assistant 文本，不导入 reasoning 或工具内部状态。新消息优
 SSE 订阅会分页回放，最多 4096 条；超过上限、事件已被清理或慢消费者导致缓冲区溢出时，
 会显式发送 `event: resync`，前端重读消息而不是静默跳号。
 
+服务重启或事件流重连后，Manager 会调用 `/api/permission/request` 主动补拉 pending
+permission，因此工具批准不会因为一次断线永久悬挂。
+
 ## 工具权限
 
 聊天 Session 的权限规则是“全部 ask”。写文件、执行命令会在 `/chat` 右侧/消息流中

@@ -109,6 +109,9 @@ Rules:
 - Order matters through deps: the task that creates a shared file comes first, consumers depend on it explicitly.
 - Prefer few, independent tasks that can run in parallel; only add dependencies that are real.
 - Mark risk high for destructive or externally visible work.
+- Validators must test the user-visible result. Do not require a specific function/class/module name
+  in exact/contains unless the goal explicitly names it; otherwise use a command validator that runs tests.
+- If a validator names a symbol or string, put that requirement in the task goal too so the worker can comply.
 
 User goal:
 ` + req.Goal + `

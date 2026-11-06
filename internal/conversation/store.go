@@ -448,6 +448,19 @@ func (s *Store) MatchLegacyMessage(conversationID, role, text string) (string, b
 	return ids[0], true, nil
 }
 
+func (s *Store) HasPermissionEvent(conversationID, requestID string) (bool, error) {
+	if requestID == "" {
+		return false, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM events
+		WHERE conversation_id=? AND kind='permission' AND data LIKE ?`,
+		conversationID, "%"+requestID+"%").Scan(&n)
+	return n > 0, err
+}
+
 func (s *Store) HasRemoteMessage(conversationID, remoteID string) (bool, error) {
 	if remoteID == "" {
 		return false, nil
