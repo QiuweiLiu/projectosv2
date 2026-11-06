@@ -1,5 +1,5 @@
 # Handoff
-Status: m1_m2_chat（持久化聊天 + 实时 SSE + 工具审批）
+Status: p3_0_p3_2（验收缓存/消息同步/SSE/Goal Handoff/Project Context）
 
 ## Goal
 在现有 Go Kernel 上增加桌面 AI 工作台：普通聊天与长期托管任务分离；
@@ -13,13 +13,16 @@ Status: m1_m2_chat（持久化聊天 + 实时 SSE + 工具审批）
 - **M2**：`/chat` 三栏工作台（项目/对话、聊天、Objective/Task）；SSE `text.delta`
   实时、最终文本落库；工具 `permission.asked` → 允许一次/总是/拒绝；
   `after`/`Last-Event-ID` 重放；桌面壳默认打开 `/chat`。
-- **M3 最小**：`project-catalog.json` + 目标目录 `project.json`；聊天/目标按项目过滤；
-  项目级 `project-state/<id>/.project/` 快照（目标/成果/阻塞/决策），支持 API/CLI 刷新。
+- **P3.0**：Objective acceptance 指纹绑定完整 plan/验收条件/全部产物内容哈希；Conversation
+  remote-id 映射与幂等同步；SSE 分页回放、慢消费者 resync。
+- **P3.1**：多轮对话 Goal Draft（来源/context version）→ 编辑确认 → Objective → Plan；
+  notes 目标真实 handoff→执行→验收→交付完成。
+- **P3.2**：Project Context Builder 注入聊天首条消息与 Planner `--context`；项目快照回写。
 - 聊天转托管：`/api/goals` + `/api/objectives/{id}/plan`，不自动执行。
 - 任务侧保留 P2：Workspace、多目标、审批、diff、`--session`、work prune、token 实测。
 
 ## Verified
-- 192 项 Go 测试 + `-race` + `vet` 全绿。
+- 206 项 Go 测试 + `-race` + `vet` 全绿。
 - 真实 OpenCode：3 轮聊天、SSE delta、工具写文件 + permission once 批准；
   serve 重启后历史与 Session 恢复；`/api/objectives` 始终为空。
 - 真实托管目标：planner → worker → reviewer → acceptance → **objective acceptance**
@@ -29,8 +32,8 @@ Status: m1_m2_chat（持久化聊天 + 实时 SSE + 工具审批）
 - 基线 HEAD：`c89a06e`；本轮已提交 `a5393f9` 并 push 到 `origin/main`。
 
 ## Open
-- 项目级 `.project` 快照已实现；尚未自动注入聊天/Planner prompt。
-- 暂停/继续调度已实现（pause/unpause），但当前 Run 仍会完成。
+- Goal Draft 合同/来源已保存；聊天元指令过滤依赖模型，需要继续观察。
+- P3.3 智能干预、P3.5 故障注入/指标仍未完整。
 - Cockpit 的 Kernel 事件仍是轮询；聊天已 SSE，`/api/events/stream` 已提供但 UI 未切换。
 - 聊天消息历史无级联清理；事件每对话保留 500 条。
 - 托管任务仍是执行前审批，不是逐工具拦截；command 不是沙箱。

@@ -390,7 +390,8 @@ func serveForeground(dir, addr string, control bool) int {
 	if defaultModel == "" {
 		defaultModel = "deepseek/deepseek-flash"
 	}
-	chatMgr := chat.New(chat.Config{Bin: os.Getenv("OPENCODE_BIN"), Root: dir, DefaultModel: defaultModel}, cstore)
+	chatMgr := chat.New(chat.Config{Bin: os.Getenv("OPENCODE_BIN"), Root: dir, DefaultModel: defaultModel,
+		ProjectContext: ws.ProjectContextText}, cstore)
 	defer chatMgr.Close()
 	mux, ctl, err := buildMux(ws, control, chatMgr)
 	if err != nil {

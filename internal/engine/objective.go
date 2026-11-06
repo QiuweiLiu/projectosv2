@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -34,25 +35,34 @@ func (e *Engine) JudgeObjective(ctx context.Context, obj goal.Objective, plan go
 	}
 	results := map[string]string{}
 	var summary []string
+	var versions []string
 	for _, task := range tasks {
 		if task.Status != domain.TaskAccepted {
 			continue
 		}
-		result, err := e.store.AcceptedResult(task.ID)
+		full, err := e.store.AcceptedResult(task.ID)
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("objective evidence for %s: %w", task.ID, err)
 		}
-		if len(result) > 8<<10 {
-			result = result[:8<<10] + "\n... (truncated)"
-		}
+		sum := sha256.Sum256([]byte(full))
+		versions = append(versions, string(task.ID)+"\x00"+task.ArtifactPath+"\x00"+hex.EncodeToString(sum[:]))
+		summary = append(summary, fmt.Sprintf("%s -> %s (%d bytes)", task.ID, task.ArtifactPath, len(full)))
+		// The model gets a bounded view; the cache identity above never truncates.
 		if len(results) < 12 {
-			results[task.ArtifactPath] = result
+			visible := full
+			if len(visible) > 8<<10 {
+				visible = visible[:8<<10] + "\n... (truncated for model input)"
+			}
+			results[task.ArtifactPath] = visible
 		}
-		summary = append(summary, fmt.Sprintf("%s -> %s (%d bytes)", task.ID, task.ArtifactPath, len(result)))
+	}
+	if len(versions) == 0 {
+		return false, fmt.Errorf("objective acceptance has no accepted artifacts")
 	}
 	sort.Strings(summary)
+	sort.Strings(versions)
 
-	version := objectiveVersion(obj, results)
+	version := objectiveVersion(obj, plan, versions)
 	taskID := domain.TaskID("objective:" + obj.ID)
 	if blocking, found, err := e.store.ReviewVerdict(taskID, version, domain.ReviewObjective); err != nil {
 		return false, err
@@ -104,22 +114,27 @@ func (e *Engine) JudgeObjective(ctx context.Context, obj goal.Objective, plan go
 	return false, nil
 }
 
-func objectiveVersion(obj goal.Objective, results map[string]string) string {
-	keys := make([]string, 0, len(results))
-	for k := range results {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+func objectiveVersion(obj goal.Objective, plan goal.Plan, artifactVersions []string) string {
 	h := sha256.New()
-	h.Write([]byte(obj.Goal))
-	h.Write([]byte{0})
-	h.Write([]byte(obj.ExpectedOutcome))
-	h.Write([]byte{0})
-	for _, k := range keys {
-		h.Write([]byte(k))
+	write := func(value string) {
+		h.Write([]byte(value))
 		h.Write([]byte{0})
-		h.Write([]byte(results[k]))
+	}
+	write(obj.ID)
+	write(obj.Title)
+	write(obj.Goal)
+	write(obj.Constraints)
+	write(obj.ExpectedOutcome)
+	write(obj.Acceptance)
+	write(fmt.Sprint(obj.PlanVersion))
+	// The complete plan is part of the identity: changing ObjectiveAcceptance,
+	// task order, validators, deps or risk must not reuse an old judgment.
+	if raw, err := json.Marshal(plan); err == nil {
+		h.Write(raw)
 		h.Write([]byte{0})
+	}
+	for _, v := range artifactVersions {
+		write(v)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

@@ -2,6 +2,7 @@ package planner
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"projectos/kernel/internal/exec"
@@ -85,5 +86,14 @@ func TestPlannerSessionIsReadOnly(t *testing.T) {
 	}
 	if fake.Starts[0].ApprovalMode != "default" {
 		t.Fatalf("approval mode = %q, want default", fake.Starts[0].ApprovalMode)
+	}
+}
+
+func TestPlannerPromptIncludesBoundedProjectContext(t *testing.T) {
+	prompt := buildPrompt(Request{Goal: "next step", Context: "Verified: hello.txt exists\nDecision: no database"})
+	for _, want := range []string{"Project context", "hello.txt", "no database", "violate an explicit"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q", want)
+		}
 	}
 }

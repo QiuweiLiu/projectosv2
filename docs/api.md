@@ -95,14 +95,22 @@ D/                           # Workspace 根
 | POST | `/api/conversations/{id}/messages` | `{text}` 发送；返回 202，回复通过 SSE 到达 |
 | POST | `/api/conversations/{id}/stop` | 中断当前 OpenCode 执行 |
 | POST | `/api/conversations/{id}/permissions/{requestId}` | `{decision: once|always|reject}` 批准工具调用 |
+| POST | `/api/conversations/{id}/handoff` | 从多轮对话提取 Goal Draft（不创建 Objective） |
+| GET | `/api/conversations/{id}/handoff` | 最近一次 Goal Draft |
+| PUT | `/api/conversations/{id}/handoff/{draftId}` | 编辑 Goal/Constraints/Outputs/Acceptance/Decisions |
+| POST | `/api/conversations/{id}/handoff/{draftId}/confirm` | 确认后创建 Objective 并生成计划（计划仍未确认） |
 | GET | `/api/conversations/{id}/events?after=N` | SSE：`id:` 为持久事件序号；`text_delta` 为实时增量，不持久化 |
 
-SSE 先回放 `after` 之后的持久事件，再推送实时事件；浏览器断线后可用
-`Last-Event-ID` 或 `after` 续传。`text_delta` 的 `seq` 为 0，最终文本由
-`assistant` 事件落库。
+SSE 先分页回放 `after` 之后的持久事件，再推送实时事件；浏览器断线后可用
+`Last-Event-ID` 或 `after` 续传。事件被保留策略清理、回放过大或慢消费者溢出时，
+服务端发送 `event: resync`，前端重新读取权威消息后再继续。`text_delta` 的 `seq` 为 0，
+最终文本由 `assistant` 事件落库。
 
 聊天工具调用默认 `ask`：写文件、执行命令会触发 `permission.asked`，必须由用户
 批准；这不是 Kernel 托管任务的执行前审批，也不是沙箱。
+
+Goal Handoff 的 `confirm` 只创建 Objective 并调用 Planner 生成计划；计划仍需单独的
+`/confirm`，不会自动执行。
 
 ## 6. 验收的三层
 

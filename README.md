@@ -28,7 +28,7 @@ P2 可用性已完成并验证：
 - Project / Objective 目录与归属映射；
 - macOS 原生外壳（非 Electron），默认打开 `/chat`。
 
-192 项 Go 测试 + `-race` + `vet` 全绿。边界与未实现项见 `docs/api.md` 第 11 节和
+206 项 Go 测试 + `-race` + `vet` 全绿。边界与未实现项见 `docs/api.md` 第 11 节和
 `.project/HANDOFF.md`。
 
 ## 快速开始

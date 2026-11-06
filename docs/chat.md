@@ -28,13 +28,18 @@ Kernel 启动一个私有的 `opencode serve --hostname 127.0.0.1 --port <free>`
 
 `conversations`、`messages`、`events` 三张表：
 
-- 用户消息和最终 assistant 文本写入 `messages`；
+- 用户消息和最终 assistant 文本写入 `messages`；`remote_id` 保存 OpenCode 稳定消息 ID，
+  同一文本的不同消息不会合并，重复同步幂等；
 - `text_delta` 只做实时推送，不写库，避免 token 级写放大；
 - 工具调用、权限请求、状态变化写入 `events`，用于断线重放；
 - `events` 每个对话保留最近 500 条；历史真相仍是 `messages`。
 
 打开历史对话时，`Sync` 会用 OpenCode 的 message 列表补齐遗漏的最终文本；只导入
-user/assistant 文本，不导入 reasoning 或工具内部状态。
+user/assistant 文本，不导入 reasoning 或工具内部状态。新消息优先按 `remote_id` 匹配，
+旧消息仅在唯一匹配时做一次兼容 adoption。
+
+SSE 订阅会分页回放，最多 4096 条；超过上限、事件已被清理或慢消费者导致缓冲区溢出时，
+会显式发送 `event: resync`，前端重读消息而不是静默跳号。
 
 ## 工具权限
 
@@ -52,9 +57,15 @@ OpenCode 执行自动变成成功；重新打开后通过 Session/message 同步
 - 窗口关闭：聊天本身不拥有 Task 生命周期；已授权的托管任务继续在 Kernel 中运行。
 - 事件断线：SSE `after`/`Last-Event-ID` 先回放持久事件；最终文本由 `Sync` 校准。
 
+## Goal Handoff
+
+`POST /api/conversations/{id}/handoff` 使用一个禁用工具的短 Session，把最近对话提取成
+Goal / Constraints / Expected Outputs / Acceptance / Decisions，并保存
+`source_message_ids` 与 `context_version`。用户可以 `PUT` 编辑，只有
+`/confirm` 才创建 Objective；计划仍需再次确认。
+
 ## 未完成
 
 - 聊天历史的全文搜索与导出；
-- 把 `project-state/<id>/.project` 自动注入聊天上下文（快照已生成，但尚未注入 prompt）；
 - 多聊天并发上限与跨设备同步；
-- 将 Kernel 事件流也改成同等级别的 SSE。
+- Goal Draft 提取对“只回复收到/不要调用工具”等聊天元指令的过滤依赖模型，需继续观察。

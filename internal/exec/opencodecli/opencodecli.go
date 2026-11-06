@@ -82,6 +82,9 @@ func (b *Backend) Start(ctx context.Context, req exec.StartRequest) (exec.StartR
 	if err != nil {
 		return exec.StartResult{}, err
 	}
+	if req.Attempt > 1 {
+		b.seedPreviousArtifact(dir, string(req.TaskID), req.ArtifactPath)
+	}
 	logPath := filepath.Join(dir, ".kernel-run.log")
 	logFile, err := os.Create(logPath)
 	if err != nil {
@@ -243,6 +246,49 @@ func (b *Backend) materialize(dir string) (map[string]string, error) {
 		// fall through to a copy if worktree creation is not possible
 	}
 	return seedDir(b.cfg.BaseDir, dir)
+}
+
+// seedPreviousArtifact carries the previous attempt's artifact into the new
+// isolated directory. A resumed session remembers the old workdir; without the
+// file the model often answers "already done" and leaves the new attempt empty.
+func (b *Backend) seedPreviousArtifact(dir, taskID, artifact string) {
+	if strings.TrimSpace(artifact) == "" {
+		return
+	}
+	entries, err := os.ReadDir(b.cfg.WorkRoot)
+	if err != nil {
+		return
+	}
+	type item struct {
+		path string
+		mod  int64
+	}
+	var dirs []item
+	base := filepath.Base(dir)
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), taskID+"-") || entry.Name() == base {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		dirs = append(dirs, item{path: filepath.Join(b.cfg.WorkRoot, entry.Name()), mod: info.ModTime().UnixNano()})
+	}
+	sort.Slice(dirs, func(i, j int) bool { return dirs[i].mod > dirs[j].mod })
+	for _, candidate := range dirs {
+		src := filepath.Join(candidate.path, filepath.FromSlash(artifact))
+		raw, err := os.ReadFile(src)
+		if err != nil {
+			continue
+		}
+		dst := filepath.Join(dir, filepath.FromSlash(artifact))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return
+		}
+		_ = os.WriteFile(dst, raw, 0o644)
+		return
+	}
 }
 
 func isGitRepo(base string) bool {

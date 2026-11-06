@@ -395,6 +395,96 @@ func (w *workspace) BuildProjectSnapshot(id string) (projectstate.ProjectSnapsho
 	return snap, nil
 }
 
+// ProjectContextText is a bounded, deterministic context bundle for chat and
+// planner prompts. It contains only verified facts and explicit decisions.
+func (w *workspace) ProjectContextText(id string) string {
+	snap, err := w.BuildProjectSnapshot(id)
+	if err != nil {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Project: %s\n", snap.Name)
+	if snap.Description != "" {
+		fmt.Fprintf(&b, "Description: %s\n", snap.Description)
+	}
+	b.WriteString("\nVerified facts (accepted task artifacts):\n")
+	if len(snap.Verified) == 0 {
+		b.WriteString("- none yet\n")
+	}
+	for i, v := range snap.Verified {
+		if i >= 10 {
+			break
+		}
+		fmt.Fprintf(&b, "- %s\n", v)
+	}
+	b.WriteString("\nVerified artifact contents (bounded; treat as read-only evidence):\n")
+	all, _ := w.list()
+	shown := 0
+	for _, p := range all {
+		if p.ProjectID != id {
+			continue
+		}
+		st, err := store.OpenReadOnly(filepath.Join(p.Dir, "kernel.db"))
+		if err != nil {
+			continue
+		}
+		tasks, _ := st.List()
+		for _, task := range tasks {
+			if task.Status != domain.TaskAccepted || shown >= 8 {
+				continue
+			}
+			content, err := st.AcceptedResult(task.ID)
+			if err != nil {
+				continue
+			}
+			if len(content) > 1024 {
+				content = content[:1024] + "\n... (truncated)"
+			}
+			fmt.Fprintf(&b, "- %s/%s [%s]\n%s\n", p.Obj.ID, task.ID, task.ArtifactPath, content)
+			shown++
+		}
+		st.Close()
+	}
+	if shown == 0 {
+		b.WriteString("- none yet\n")
+	}
+	b.WriteString("\nExplicit user decisions:\n")
+	if len(snap.Decisions) == 0 {
+		b.WriteString("- none recorded\n")
+	}
+	for i, d := range snap.Decisions {
+		if i >= 5 {
+			break
+		}
+		fmt.Fprintf(&b, "- %s\n", d)
+	}
+	b.WriteString("\nIn-progress objectives:\n")
+	for i, obj := range snap.Objectives {
+		if i >= 6 {
+			break
+		}
+		if obj.Status == "active" || obj.Status == "planned" || obj.Status == "draft" {
+			fmt.Fprintf(&b, "- %s [%s] %s\n", obj.ID, obj.Status, obj.Goal)
+		}
+	}
+	if len(snap.Blockers) > 0 {
+		b.WriteString("\nUnresolved blockers:\n")
+		for i, blocker := range snap.Blockers {
+			if i >= 4 {
+				break
+			}
+			fmt.Fprintf(&b, "- %s\n", blocker)
+		}
+	}
+	b.WriteString("\nRules: do not repeat verified work; do not violate explicit decisions; ")
+	b.WriteString("unverified claims are not project facts; do not modify already accepted artifacts.\n")
+	out := b.String()
+	if len(out) > 4096 {
+		out = strings.ToValidUTF8(out[:4096], "") + "\n... (context truncated)"
+	}
+	return out
+}
+
 func (w *workspace) projectDecisions(id string) []string {
 	raw, err := os.ReadFile(filepath.Join(w.root, "project-state", id, "decisions.json"))
 	if err != nil {

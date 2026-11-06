@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -117,5 +119,106 @@ func TestObjectiveJudgeFailsClosedWhenBudgetExhausted(t *testing.T) {
 	}
 	if _, err := e.JudgeObjective(context.Background(), obj, plan); err == nil {
 		t.Fatal("objective judgment passed with no review budget")
+	}
+}
+
+func addAcceptedArtifact(t *testing.T, st *store.Store, objectiveID, id, path, content string, version int) {
+	t.Helper()
+	if err := st.CreateTask(domain.Task{ID: domain.TaskID(id), ObjectiveID: objectiveID, PlanVersion: version,
+		Prompt: "p", Validator: "ok", ArtifactPath: path}); err != nil {
+		t.Fatal(err)
+	}
+	run, ok, err := st.Claim(domain.TaskID(id), "run-"+id, "fake")
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	if _, err := st.SettleRun(store.Settlement{RunID: run.ID, RunStatus: domain.RunSucceeded,
+		Result: content, Accepted: true}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestObjectiveJudgeInvalidatesOnAcceptanceChange(t *testing.T) {
+	st, obj, plan := objectiveFixture(t)
+	defer st.Close()
+	judge := &fakeObjectiveJudge{}
+	e := New(st, exec.NewFake(1), 1, nil).WithObjectiveJudge(judge)
+	if blocked, err := e.JudgeObjective(context.Background(), obj, plan); err != nil || blocked {
+		t.Fatal(blocked, err)
+	}
+	plan.ObjectiveAcceptance = []string{"a different criterion"}
+	if _, err := e.JudgeObjective(context.Background(), obj, plan); err != nil {
+		t.Fatal(err)
+	}
+	if judge.calls != 2 {
+		t.Fatalf("judge calls = %d, want 2", judge.calls)
+	}
+}
+
+func TestObjectiveVersionCoversAllArtifacts(t *testing.T) {
+	obj, plan := goalObjective()
+	base := make([]string, 13)
+	for i := range base {
+		base[i] = fmt.Sprintf("T%d\x00f%d.txt\x00v%d", i+1, i+1, i+1)
+	}
+	a := objectiveVersion(obj, plan, base)
+	changed := append([]string(nil), base...)
+	changed[12] = "T13\x00f13.txt\x00changed-after-cap"
+	b := objectiveVersion(obj, plan, changed)
+	if a == b {
+		t.Fatal("artifact beyond the 12-item input cap did not invalidate the hash")
+	}
+}
+
+func TestObjectiveVersionCoversFullContent(t *testing.T) {
+	obj, plan := goalObjective()
+	// The caller hashes the complete content before passing it here; this test
+	// documents that the identity is not a prefix of the model-visible text.
+	a := objectiveVersion(obj, plan, []string{"long\x00long.txt\x00" + strings.Repeat("a", 64)})
+	b := objectiveVersion(obj, plan, []string{"long\x00long.txt\x00" + strings.Repeat("a", 63) + "b"})
+	if a == b {
+		t.Fatal("tail-only content change did not invalidate the hash")
+	}
+}
+
+func goalObjective() (goal.Objective, goal.Plan) {
+	return goal.Objective{ID: "obj-1", Title: "t", Goal: "ship", ExpectedOutcome: "app runs",
+			PlanVersion: 1, Acceptance: "accept"},
+		goal.Plan{ObjectiveAcceptance: []string{"the app starts"}}
+}
+
+func TestObjectiveJudgePlanVersionInvalidates(t *testing.T) {
+	st, obj, plan := objectiveFixture(t)
+	defer st.Close()
+	judge := &fakeObjectiveJudge{}
+	e := New(st, exec.NewFake(1), 1, nil).WithObjectiveJudge(judge)
+	if _, err := e.JudgeObjective(context.Background(), obj, plan); err != nil {
+		t.Fatal(err)
+	}
+	plan2 := goal.Plan{ObjectiveAcceptance: plan.ObjectiveAcceptance,
+		Tasks: []goal.PlanTask{{ID: "T2", Goal: "second", Artifacts: []string{"b.txt"}}}}
+	if _, err := st.CreatePlan(obj.ID, 2, plan2, "hash-2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ConfirmPlan(obj.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	obj.PlanVersion = 2
+	addAcceptedArtifact(t, st, obj.ID, "T2", "b.txt", "delivered", 2)
+	if _, err := e.JudgeObjective(context.Background(), obj, plan); err != nil {
+		t.Fatal(err)
+	}
+	if judge.calls != 2 {
+		t.Fatalf("judge calls = %d, want 2", judge.calls)
+	}
+}
+
+func TestObjectiveJudgeFailsClosedOnClosedStore(t *testing.T) {
+	st, obj, plan := objectiveFixture(t)
+	judge := &fakeObjectiveJudge{}
+	e := New(st, exec.NewFake(1), 1, nil).WithObjectiveJudge(judge)
+	st.Close()
+	if _, err := e.JudgeObjective(context.Background(), obj, plan); err == nil {
+		t.Fatal("closed store did not fail closed")
 	}
 }

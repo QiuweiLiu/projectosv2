@@ -378,6 +378,7 @@ async function loadObjectives(){
 function selectObjective(id){
   if (state.id === id && state.detail) return;
   state.id = id; state.task = null; state.detail = null; state.events = []; state.report = null;
+  startKernelStream(id);
   history.replaceState(null, '', '#goal=' + encodeURIComponent(id));
   loadObjectives(); loadDetail(); loadReport(); loadEvents(); loadModels();
 }
@@ -740,6 +741,10 @@ async function loadEvents(){
   const merged = new Map(state.events.map(e => [e.seq, e]));
   fresh.forEach(e => merged.set(e.seq, e));
   state.events = [...merged.values()].sort((a, b) => b.seq - a.seq).slice(0, 200);
+  renderTimeline();
+}
+
+function renderTimeline(){
   const tl = $('timeline'); tl.textContent = '';
   if (!state.events.length) { tl.innerHTML = '<span class="empty">还没有事件</span>'; return; }
   state.events.forEach(e => {
@@ -748,6 +753,22 @@ async function loadEvents(){
       '<span class="what">' + eventText(e) + '</span>';
     tl.appendChild(row);
   });
+}
+
+function startKernelStream(id){
+  if(state.eventStream){ state.eventStream.close(); state.eventStream = null; }
+  if(!window.EventSource) return;
+  const es = new EventSource('/api/events/stream?objective=' + encodeURIComponent(id));
+  es.onmessage = ev => {
+    try {
+      const e = JSON.parse(ev.data);
+      const merged = new Map(state.events.map(x => [x.seq, x]));
+      merged.set(e.seq, e);
+      state.events = [...merged.values()].sort((a, b) => b.seq - a.seq).slice(0, 200);
+      renderTimeline();
+    } catch(_) {}
+  };
+  state.eventStream = es;
 }
 
 /* ---------- actions ---------- */

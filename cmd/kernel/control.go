@@ -76,11 +76,14 @@ func (c *controlServer) authorised(r *http.Request) bool {
 }
 
 type goalRequest struct {
-	Goal      string `json:"goal"`
-	Title     string `json:"title"`
-	ProjectID string `json:"projectId"`
-	RunNow    bool   `json:"runNow"`
-	Reviewer  bool   `json:"reviewer"`
+	Goal        string `json:"goal"`
+	Title       string `json:"title"`
+	ProjectID   string `json:"projectId"`
+	Constraints string `json:"constraints,omitempty"`
+	Expected    string `json:"expected,omitempty"`
+	Acceptance  string `json:"acceptance,omitempty"`
+	RunNow      bool   `json:"runNow"`
+	Reviewer    bool   `json:"reviewer"`
 }
 
 func (c *controlServer) createGoal(w http.ResponseWriter, r *http.Request) {
@@ -89,58 +92,75 @@ func (c *controlServer) createGoal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req goalRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10)).Decode(&req); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(req.Goal) == "" {
+	req.Goal = strings.TrimSpace(req.Goal)
+	if req.Goal == "" {
 		http.Error(w, "goal is required", http.StatusBadRequest)
 		return
 	}
-	projectID := strings.TrimSpace(req.ProjectID)
-	if projectID == "" {
-		projectID = defaultProjectID
-	}
-	if _, ok, err := c.ws.FindProject(projectID); err != nil || !ok {
-		http.Error(w, "unknown project", http.StatusBadRequest)
-		return
-	}
-	dir, err := c.ws.newProjectDir()
+	id, err := c.createObjective(req)
 	if err != nil {
-		http.Error(w, "create: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "create: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := writeProjectMeta(dir, projectID); err != nil {
-		http.Error(w, "project: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	args := []string{"goal", "create", "--dir", dir, "--goal", req.Goal}
-	if req.Title != "" {
-		args = append(args, "--title", req.Title)
-	}
-	if _, err := c.runGoal(dir, args...); err != nil {
-		http.Error(w, "create: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	id, err := objectiveInDir(dir)
-	if err != nil {
-		http.Error(w, "create: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	dir = c.ws.adopt(dir, id)
-	c.set(id, "draft")
-	c.ws.invalidate()
-	_, _ = c.ws.ProjectSnapshot(projectID)
-
 	w.Header().Set("Content-Type", "application/json")
 	_ = writeJSON(w, map[string]string{"objective": id, "status": "draft"})
-
 	if req.RunNow {
 		// Legacy `runNow` used to mean plan + confirm + run in one request. That
 		// skipped the exact confirmation the workflow exists to enforce. It now
 		// only plans; the caller must confirm and run explicitly.
 		go c.planOnly(id)
 	}
+}
+
+// createObjective is shared by the HTTP create endpoint and the chat handoff
+// confirmation. It never confirms a plan or starts a run.
+func (c *controlServer) createObjective(req goalRequest) (string, error) {
+	if strings.TrimSpace(req.Goal) == "" {
+		return "", fmt.Errorf("goal is required")
+	}
+	projectID := strings.TrimSpace(req.ProjectID)
+	if projectID == "" {
+		projectID = defaultProjectID
+	}
+	if _, ok, err := c.ws.FindProject(projectID); err != nil || !ok {
+		return "", fmt.Errorf("unknown project")
+	}
+	dir, err := c.ws.newProjectDir()
+	if err != nil {
+		return "", err
+	}
+	if err := writeProjectMeta(dir, projectID); err != nil {
+		return "", err
+	}
+	args := []string{"goal", "create", "--dir", dir, "--goal", req.Goal}
+	if req.Title != "" {
+		args = append(args, "--title", req.Title)
+	}
+	if req.Constraints != "" {
+		args = append(args, "--constraints", req.Constraints)
+	}
+	if req.Expected != "" {
+		args = append(args, "--expected", req.Expected)
+	}
+	if req.Acceptance != "" {
+		args = append(args, "--acceptance", req.Acceptance)
+	}
+	if _, err := c.runGoal(dir, args...); err != nil {
+		return "", err
+	}
+	id, err := objectiveInDir(dir)
+	if err != nil {
+		return "", err
+	}
+	dir = c.ws.adopt(dir, id)
+	c.set(id, "draft")
+	c.ws.invalidate()
+	_, _ = c.ws.ProjectSnapshot(projectID)
+	return id, nil
 }
 
 // objectiveInDir reads the id back from the database instead of scraping CLI
@@ -173,7 +193,11 @@ func (c *controlServer) planOnly(id string) {
 		return
 	}
 	c.set(id, "planning")
-	if _, err := c.runGoal(p.Dir, "goal", "plan", "--dir", p.Dir, "--planner", "model"); err != nil {
+	args := []string{"goal", "plan", "--dir", p.Dir, "--planner", "model"}
+	if ctx := c.ws.ProjectContextText(p.ProjectID); ctx != "" {
+		args = append(args, "--context", ctx)
+	}
+	if _, err := c.runGoal(p.Dir, args...); err != nil {
 		c.set(id, "plan failed: "+err.Error())
 		return
 	}
@@ -237,7 +261,11 @@ func (c *controlServer) objectiveAction(w http.ResponseWriter, r *http.Request, 
 		go func() {
 			defer c.release(id)
 			c.set(id, "planning")
-			if _, err := c.runGoal(p.Dir, "goal", "plan", "--dir", p.Dir, "--planner", "model"); err != nil {
+			args := []string{"goal", "plan", "--dir", p.Dir, "--planner", "model"}
+			if ctx := c.ws.ProjectContextText(p.ProjectID); ctx != "" {
+				args = append(args, "--context", ctx)
+			}
+			if _, err := c.runGoal(p.Dir, args...); err != nil {
 				c.set(id, "plan failed: "+err.Error())
 				return
 			}
@@ -287,7 +315,11 @@ func (c *controlServer) objectiveAction(w http.ResponseWriter, r *http.Request, 
 		go func() {
 			defer c.release(id)
 			c.set(id, "planning continuation")
-			if _, err := c.runGoal(p.Dir, "goal", "continue", "--dir", p.Dir, "--goal", req.Goal); err != nil {
+			args := []string{"goal", "continue", "--dir", p.Dir, "--goal", req.Goal}
+			if ctx := c.ws.ProjectContextText(p.ProjectID); ctx != "" {
+				args = append(args, "--context", ctx)
+			}
+			if _, err := c.runGoal(p.Dir, args...); err != nil {
 				c.set(id, "continue failed: "+err.Error())
 				return
 			}

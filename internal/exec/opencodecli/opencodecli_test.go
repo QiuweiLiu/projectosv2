@@ -202,3 +202,23 @@ func TestApprovalModeAndUsageWithArtifact(t *testing.T) {
 		t.Fatalf("worker did not get --auto: %s", args)
 	}
 }
+
+func TestRetryCopiesPreviousArtifact(t *testing.T) {
+	root := t.TempDir()
+	prev := filepath.Join(root, "T1-1-1")
+	cur := filepath.Join(root, "T1-2-2")
+	for _, dir := range []string{prev, cur} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(prev, "a.txt"), []byte("previous content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := New(Config{Model: "provider/model", Bin: "opencode", WorkRoot: root})
+	b.seedPreviousArtifact(cur, "T1", "a.txt")
+	raw, err := os.ReadFile(filepath.Join(cur, "a.txt"))
+	if err != nil || string(raw) != "previous content" {
+		t.Fatalf("seeded = %q %v", raw, err)
+	}
+}

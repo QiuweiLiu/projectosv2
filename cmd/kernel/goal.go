@@ -230,6 +230,7 @@ func goalPlan(args []string) int {
 	model := fs.String("model", "", "provider/model for the planner (default: settings or built-in)")
 	executor := fs.String("executor", "opencode", "opencode | ao")
 	maxTasks := fs.Int("max-tasks", 8, "task limit")
+	projectContext := fs.String("context", "", "bounded project context for the planner")
 	if err := fs.Parse(args); err != nil {
 		return exitError
 	}
@@ -288,7 +289,7 @@ func goalPlan(args []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	plan, _, err := planner.Generate(ctx, p, planner.Request{Goal: obj.Goal, Constraints: obj.Constraints,
-		Expected: obj.ExpectedOutcome, MaxTasks: *maxTasks}, 2) // no host path: the model plans relative to the task workspace
+		Expected: obj.ExpectedOutcome, MaxTasks: *maxTasks, Context: *projectContext}, 2) // no host path: the model plans relative to the task workspace
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "planner:", err)
 		return exitError
@@ -1389,6 +1390,7 @@ func goalContinue(args []string) int {
 	executor := fs.String("executor", "opencode", "opencode | ao")
 	planFile := fs.String("plan-file", "", "plan JSON for the fake planner")
 	maxTasks := fs.Int("max-tasks", 8, "task limit for the new plan")
+	projectContext := fs.String("context", "", "bounded project context for the planner")
 	if err := fs.Parse(args); err != nil {
 		return exitError
 	}
@@ -1464,6 +1466,7 @@ func goalContinue(args []string) int {
 	defer cancel()
 	plan, _, err := planner.Generate(ctx, p, planner.Request{
 		Goal: obj.Goal, Constraints: obj.Constraints, Feedback: feedback, MaxTasks: *maxTasks,
+		Context: *projectContext,
 	}, 2)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "plan:", err)

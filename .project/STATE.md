@@ -1,12 +1,12 @@
 # State
 
 ## Stage
-M1/M2 完成：在 P2 的 Kernel 之上增加持久化聊天工作台。普通聊天不创建 Objective；
-OpenCode v2 Session + SSE 流 + 工具级 ask 审批；聊天可显式转成托管目标。
-Kernel 仍是 Task/Run 唯一写者；单机、单用户、多目标 Workspace + Project 归属。
+P3.0-P3.2 完成：Objective Acceptance 指纹、Conversation remote-id 同步、SSE 分页/resync、
+多轮对话 Goal Handoff、Project Context 注入聊天/Planner。P3.3-P3.5 只做最小部分。
+Kernel 仍是 Task/Run 唯一写者；单机、单用户、多目标 Workspace + Project。
 
 ## Verified
-- **192 项测试 + `-race` + `vet` 全绿**；真实运行后无残留进程。本轮提交 `0fe6495`，已 push。
+- **206 项测试 + `-race` + `vet` 全绿**；真实运行后无残留进程。
 - **场景 A**：待办应用 3 任务，`node test.js` 验收，`out/` 组装后 11–14 项测试通过。
 - **场景 B**：sales.csv → summarize.js → summary.md，总额 60（一次通过，0 阻断）。
 - **场景 C**：真实模型重规划（T1 失败 → T1-fix → 完成）。
@@ -53,6 +53,12 @@ Kernel 仍是 Task/Run 唯一写者；单机、单用户、多目标 Workspace +
 - **界面**：中文状态、汇报卡片、成果区、任务图、证据/审查、时间线、confirm/run/cancel、继续改进；
   执行前审批弹窗（风险/命令/预算）、任务产物的文本 diff、多目标切换。
 - **恢复**：写打开独占 `kernel.lock` 并恢复；读命令只读打开，不触发恢复。
+- **P3.0**：Objective acceptance 缓存绑定完整 plan/ObjectiveAcceptance/所有产物完整内容哈希；
+  Conversation 消息使用 OpenCode `remote_id`，同文本不同消息保留；SSE 分页回放、慢消费者 resync。
+- **P3.1**：多轮聊天 → Goal Draft（来源消息/context version）→ 用户编辑确认 → Objective →
+  Planner 计划（仍需二次确认）。真实 notes 目标完成 handoff→执行→验收→交付。
+- **P3.2**：Project Context Builder 进入聊天首条消息与 Planner `--context`，包含已验证产物内容、
+  决策、活跃目标、阻塞；项目快照从目标库重建。
 - **P2**：多目标 Workspace、执行前审批、文本 diff、`--session` 续跑、work 保留 20、token 实测优先、
   macOS 原生外壳（WKWebView）。
 - **聊天**：Conversation SQLite、OpenCode v2 Session/SSE、工具 ask 审批、历史同步、Project 过滤。
@@ -63,6 +69,6 @@ Kernel 仍是 Task/Run 唯一写者；单机、单用户、多目标 Workspace +
 - 会话续跑只续对话上下文，不续工作目录；重试仍在新目录。
 - 聊天事件只保留最近 500 条/对话；`text_delta` 不持久化；消息历史无级联清理。
 - 托管任务仍是执行前审批，不是逐工具拦截；command 不是沙箱。
-- 项目级 `.project` 快照已生成；尚未把它自动注入聊天/Planner 的 prompt。
-- 未做：Cockpit SSE（聊天已 SSE）、Windows/Linux、二进制行级 diff、日志轮转。
+- 项目级上下文已注入聊天/Planner；Goal Draft 对聊天元指令的过滤仍需模型质量验证。
+- 未做：Windows/Linux、托管任务逐工具审批、二进制行级 diff、P3.5 磁盘/SQLite 故障注入。
 - 未注入：取消与调度器完成的进程级交错、磁盘满/只读挂载、运行中 SQLite 失效。

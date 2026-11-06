@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,7 +103,7 @@ func TestSubscribeReplaysPersistedEvents(t *testing.T) {
 	if _, err := st.AppendEvent(c.ID, "tool", map[string]string{"id": "1"}); err != nil {
 		t.Fatal(err)
 	}
-	ch, cancel, err := m.Subscribe(c.ID, 0)
+	ch, _, _, cancel, err := m.Subscribe(c.ID, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,5 +115,95 @@ func TestSubscribeReplaysPersistedEvents(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("no replayed event")
+	}
+}
+
+func TestSubscribePaginatesEvents(t *testing.T) {
+	m, st, c := testManager(t)
+	for i := 0; i < 650; i++ {
+		if _, err := st.AppendEvent(c.ID, "tool", map[string]int{"n": i}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ch, _, gap, cancel, err := m.Subscribe(c.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	if gap {
+		t.Fatal("fresh subscription reported a gap")
+	}
+	last := int64(0)
+	for i := 0; i < 650; i++ {
+		select {
+		case ev := <-ch:
+			if ev.Seq <= last {
+				t.Fatalf("out of order: %d after %d", ev.Seq, last)
+			}
+			last = ev.Seq
+		case <-time.After(time.Second):
+			t.Fatalf("missing replay event %d", i)
+		}
+	}
+}
+
+func TestSubscribeReportsPrunedGap(t *testing.T) {
+	m, st, c := testManager(t)
+	for i := 0; i < 10; i++ {
+		if _, err := st.AppendEvent(c.ID, "tool", map[string]int{"n": i}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.PruneEvents(3); err != nil {
+		t.Fatal(err)
+	}
+	ch, _, gap, cancel, err := m.Subscribe(c.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	if !gap {
+		t.Fatal("pruned cursor did not report a gap")
+	}
+	// The remaining events are still replayable and ordered.
+	select {
+	case ev := <-ch:
+		if ev.Seq == 0 {
+			t.Fatal("empty replay event")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no post-prune replay")
+	}
+}
+
+func TestSlowConsumerGetsResyncSignal(t *testing.T) {
+	m, _, c := testManager(t)
+	ch, done, _, cancel, err := m.Subscribe(c.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	// Do not read ch; fill it past capacity.
+	for i := 0; i < 5000; i++ {
+		m.publish(conversation.Event{ConversationID: c.ID, Kind: "tool", Data: json.RawMessage(`{}`)})
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("slow consumer did not receive a resync signal")
+	}
+	_ = ch
+}
+
+func TestPromptContextInjectedOnce(t *testing.T) {
+	c := conversation.Conversation{ProjectID: "proj-1"}
+	provider := func(string) string { return "Verified: hello.txt" }
+	first := promptWithContext("do it", c, provider)
+	if !strings.Contains(first, "hello.txt") || !strings.Contains(first, "User request") {
+		t.Fatalf("first = %q", first)
+	}
+	c.ContextSent = true
+	if got := promptWithContext("next", c, provider); got != "next" {
+		t.Fatalf("second = %q", got)
 	}
 }

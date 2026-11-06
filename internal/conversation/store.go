@@ -35,6 +35,7 @@ type Conversation struct {
 	SessionID   string    `json:"sessionId,omitempty"`
 	Model       string    `json:"model,omitempty"`
 	Status      Status    `json:"status"`
+	ContextSent bool      `json:"contextSent"`
 	LastError   string    `json:"lastError,omitempty"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
@@ -43,9 +44,26 @@ type Conversation struct {
 type Message struct {
 	ID             string    `json:"id"`
 	ConversationID string    `json:"conversationId"`
+	RemoteID       string    `json:"remoteId,omitempty"`
 	Role           string    `json:"role"` // user | assistant
 	Text           string    `json:"text"`
 	CreatedAt      time.Time `json:"createdAt"`
+}
+
+type GoalDraft struct {
+	ID               string    `json:"id"`
+	ConversationID   string    `json:"conversationId"`
+	ProjectID        string    `json:"projectId,omitempty"`
+	Goal             string    `json:"goal"`
+	Constraints      []string  `json:"constraints,omitempty"`
+	ExpectedOutputs  []string  `json:"expectedOutputs,omitempty"`
+	Acceptance       []string  `json:"acceptance,omitempty"`
+	Decisions        []string  `json:"decisions,omitempty"`
+	SourceMessageIDs []string  `json:"sourceMessageIds,omitempty"`
+	ContextVersion   string    `json:"contextVersion,omitempty"`
+	Status           string    `json:"status"` // draft | confirmed
+	CreatedAt        time.Time `json:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
 }
 
 type Event struct {
@@ -71,6 +89,7 @@ CREATE TABLE IF NOT EXISTS conversations (
 	session_id   TEXT NOT NULL DEFAULT '',
 	model        TEXT NOT NULL DEFAULT '',
 	status       TEXT NOT NULL DEFAULT 'idle',
+	context_sent INTEGER NOT NULL DEFAULT 0,
 	last_error   TEXT NOT NULL DEFAULT '',
 	created_at   TEXT NOT NULL,
 	updated_at   TEXT NOT NULL
@@ -78,6 +97,7 @@ CREATE TABLE IF NOT EXISTS conversations (
 CREATE TABLE IF NOT EXISTS messages (
 	id              TEXT PRIMARY KEY,
 	conversation_id TEXT NOT NULL,
+	remote_id       TEXT NOT NULL DEFAULT '',
 	role            TEXT NOT NULL,
 	text            TEXT NOT NULL,
 	created_at      TEXT NOT NULL
@@ -91,6 +111,22 @@ CREATE TABLE IF NOT EXISTS events (
 	at              TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_conversation ON events(conversation_id, seq);
+CREATE TABLE IF NOT EXISTS goal_drafts (
+	id                 TEXT PRIMARY KEY,
+	conversation_id    TEXT NOT NULL,
+	project_id         TEXT NOT NULL DEFAULT '',
+	goal               TEXT NOT NULL,
+	constraints        TEXT NOT NULL DEFAULT '[]',
+	expected_outputs   TEXT NOT NULL DEFAULT '[]',
+	acceptance         TEXT NOT NULL DEFAULT '[]',
+	decisions          TEXT NOT NULL DEFAULT '[]',
+	source_message_ids TEXT NOT NULL DEFAULT '[]',
+	context_version    TEXT NOT NULL DEFAULT '',
+	status             TEXT NOT NULL DEFAULT 'draft',
+	created_at         TEXT NOT NULL,
+	updated_at         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_goal_drafts_conversation ON goal_drafts(conversation_id, updated_at);
 `
 
 func Open(path string) (*Store, error) {
@@ -114,10 +150,75 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrateConversations(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := migrateMessages(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
+
+func migrateConversations(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(conversations)`)
+	if err != nil {
+		return err
+	}
+	have := false
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "context_sent" {
+			have = true
+		}
+	}
+	rows.Close()
+	if !have {
+		_, err := db.Exec(`ALTER TABLE conversations ADD COLUMN context_sent INTEGER NOT NULL DEFAULT 0`)
+		return err
+	}
+	return nil
+}
+
+func migrateMessages(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(messages)`)
+	if err != nil {
+		return err
+	}
+	have := false
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "remote_id" {
+			have = true
+		}
+	}
+	rows.Close()
+	if !have {
+		if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN remote_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_remote
+		ON messages(conversation_id, remote_id) WHERE remote_id <> ''`)
+	return err
+}
 
 func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }
 
@@ -161,10 +262,12 @@ func (s *Store) Get(id string) (Conversation, bool, error) {
 func (s *Store) getLocked(id string) (Conversation, error) {
 	var c Conversation
 	var created, updated string
-	err := s.db.QueryRow(`SELECT id,title,project_id,objective_id,dir,session_id,model,status,last_error,created_at,updated_at
+	var contextSent int
+	err := s.db.QueryRow(`SELECT id,title,project_id,objective_id,dir,session_id,model,status,context_sent,last_error,created_at,updated_at
 		FROM conversations WHERE id=?`, id).Scan(
 		&c.ID, &c.Title, &c.ProjectID, &c.ObjectiveID, &c.Dir, &c.SessionID, &c.Model,
-		&c.Status, &c.LastError, &created, &updated)
+		&c.Status, &contextSent, &c.LastError, &created, &updated)
+	c.ContextSent = contextSent == 1
 	if err != nil {
 		return Conversation{}, err
 	}
@@ -185,7 +288,7 @@ func (s *Store) List(limit int) ([]Summary, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rows, err := s.db.Query(`SELECT c.id,c.title,c.project_id,c.objective_id,c.dir,c.session_id,c.model,
-		c.status,c.last_error,c.created_at,c.updated_at,
+		c.status,c.context_sent,c.last_error,c.created_at,c.updated_at,
 		COALESCE((SELECT m.text FROM messages m WHERE m.conversation_id=c.id ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1),'')
 		FROM conversations c ORDER BY c.updated_at DESC LIMIT ?`, limit)
 	if err != nil {
@@ -196,14 +299,23 @@ func (s *Store) List(limit int) ([]Summary, error) {
 	for rows.Next() {
 		var c Summary
 		var created, updated string
+		var contextSent int
 		if err := rows.Scan(&c.ID, &c.Title, &c.ProjectID, &c.ObjectiveID, &c.Dir, &c.SessionID, &c.Model,
-			&c.Status, &c.LastError, &created, &updated, &c.LastMessage); err != nil {
+			&c.Status, &contextSent, &c.LastError, &created, &updated, &c.LastMessage); err != nil {
 			return nil, err
 		}
 		c.CreatedAt, c.UpdatedAt = parseTime(created), parseTime(updated)
+		c.ContextSent = contextSent == 1
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) MarkContextSent(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE conversations SET context_sent=1, updated_at=? WHERE id=?`, now(), id)
+	return err
 }
 
 func (s *Store) SetSession(id, sessionID string) error {
@@ -243,17 +355,109 @@ func (s *Store) Rename(id, title string) error {
 }
 
 func (s *Store) AppendMessage(conversationID, role, text string) (Message, error) {
+	return s.AppendMessageWithRemote(conversationID, role, text, "", time.Now().UTC())
+}
+
+// AppendMessageWithRemote stores a message with the provider's stable message
+// id. Re-syncing the same remote message is idempotent; two different remote
+// messages with identical text are both kept.
+func (s *Store) AppendMessageWithRemote(conversationID, role, text, remoteID string, at time.Time) (Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	msg := Message{ID: fmt.Sprintf("msg-%d", time.Now().UnixNano()), ConversationID: conversationID,
-		Role: role, Text: text, CreatedAt: time.Now().UTC()}
-	_, err := s.db.Exec(`INSERT INTO messages (id,conversation_id,role,text,created_at) VALUES (?,?,?,?,?)`,
-		msg.ID, msg.ConversationID, msg.Role, msg.Text, msg.CreatedAt.Format(time.RFC3339Nano))
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	msg := Message{ID: fmt.Sprintf("msg_%d", time.Now().UnixNano()), ConversationID: conversationID,
+		RemoteID: remoteID, Role: role, Text: text, CreatedAt: at.UTC()}
+	if remoteID != "" {
+		var existingID string
+		err := s.db.QueryRow(`SELECT id FROM messages WHERE conversation_id=? AND remote_id=?`,
+			conversationID, remoteID).Scan(&existingID)
+		if err == nil {
+			return s.messageLocked(conversationID, existingID)
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return Message{}, err
+		}
+	}
+	_, err := s.db.Exec(`INSERT INTO messages (id,conversation_id,remote_id,role,text,created_at)
+		VALUES (?,?,?,?,?,?)`,
+		msg.ID, msg.ConversationID, msg.RemoteID, msg.Role, msg.Text, msg.CreatedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		return Message{}, err
 	}
 	_, _ = s.db.Exec(`UPDATE conversations SET updated_at=? WHERE id=?`, now(), conversationID)
 	return msg, nil
+}
+
+func (s *Store) messageLocked(conversationID, id string) (Message, error) {
+	var m Message
+	var created string
+	err := s.db.QueryRow(`SELECT id,conversation_id,remote_id,role,text,created_at FROM messages
+		WHERE conversation_id=? AND id=?`, conversationID, id).Scan(
+		&m.ID, &m.ConversationID, &m.RemoteID, &m.Role, &m.Text, &created)
+	if err != nil {
+		return Message{}, err
+	}
+	m.CreatedAt = parseTime(created)
+	return m, nil
+}
+
+func (s *Store) SetRemoteID(localID, remoteID string) error {
+	if remoteID == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE messages SET remote_id=? WHERE id=?`, remoteID, localID)
+	return err
+}
+
+func (s *Store) HasMessageID(conversationID, id string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM messages WHERE conversation_id=? AND id=?`,
+		conversationID, id).Scan(&n)
+	return n > 0, err
+}
+
+// MatchLegacyMessage returns a unique old row that predates remote_id. It is
+// used only for backward-compatible sync; new rows always match by remote id.
+func (s *Store) MatchLegacyMessage(conversationID, role, text string) (string, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.Query(`SELECT id FROM messages
+		WHERE conversation_id=? AND role=? AND text=? AND remote_id='' LIMIT 2`,
+		conversationID, role, text)
+	if err != nil {
+		return "", false, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return "", false, err
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) != 1 {
+		return "", false, rows.Err()
+	}
+	return ids[0], true, nil
+}
+
+func (s *Store) HasRemoteMessage(conversationID, remoteID string) (bool, error) {
+	if remoteID == "" {
+		return false, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM messages WHERE conversation_id=? AND remote_id=?`,
+		conversationID, remoteID).Scan(&n)
+	return n > 0, err
 }
 
 func (s *Store) Messages(conversationID string, limit int, before string) ([]Message, error) {
@@ -262,7 +466,7 @@ func (s *Store) Messages(conversationID string, limit int, before string) ([]Mes
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	query := `SELECT id,conversation_id,role,text,created_at FROM messages
+	query := `SELECT id,conversation_id,remote_id,role,text,created_at FROM messages
 		WHERE conversation_id=?`
 	args := []any{conversationID}
 	if before != "" {
@@ -280,7 +484,7 @@ func (s *Store) Messages(conversationID string, limit int, before string) ([]Mes
 	for rows.Next() {
 		var m Message
 		var created string
-		if err := rows.Scan(&m.ID, &m.ConversationID, &m.Role, &m.Text, &created); err != nil {
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.RemoteID, &m.Role, &m.Text, &created); err != nil {
 			return nil, err
 		}
 		m.CreatedAt = parseTime(created)
@@ -333,6 +537,116 @@ func (s *Store) EventsAfter(conversationID string, after int64, limit int) ([]Ev
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) CreateGoalDraft(d GoalDraft) (GoalDraft, error) {
+	if strings.TrimSpace(d.ConversationID) == "" || strings.TrimSpace(d.Goal) == "" {
+		return GoalDraft{}, fmt.Errorf("goal draft needs conversation and goal")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d.ID = fmt.Sprintf("draft-%d", time.Now().UnixNano())
+	if d.Status == "" {
+		d.Status = "draft"
+	}
+	d.CreatedAt, d.UpdatedAt = time.Now().UTC(), time.Now().UTC()
+	raw := func(v any) string { b, _ := json.Marshal(v); return string(b) }
+	_, err := s.db.Exec(`INSERT INTO goal_drafts
+		(id,conversation_id,project_id,goal,constraints,expected_outputs,acceptance,decisions,
+		 source_message_ids,context_version,status,created_at,updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		d.ID, d.ConversationID, d.ProjectID, d.Goal, raw(d.Constraints), raw(d.ExpectedOutputs),
+		raw(d.Acceptance), raw(d.Decisions), raw(d.SourceMessageIDs), d.ContextVersion, d.Status,
+		d.CreatedAt.Format(time.RFC3339Nano), d.UpdatedAt.Format(time.RFC3339Nano))
+	if err != nil {
+		return GoalDraft{}, err
+	}
+	return d, nil
+}
+
+func (s *Store) GetGoalDraft(id string) (GoalDraft, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.getDraftLocked(id)
+}
+
+func (s *Store) LatestGoalDraft(conversationID string) (GoalDraft, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var id string
+	err := s.db.QueryRow(`SELECT id FROM goal_drafts WHERE conversation_id=?
+		ORDER BY updated_at DESC, rowid DESC LIMIT 1`, conversationID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return GoalDraft{}, false, nil
+	}
+	if err != nil {
+		return GoalDraft{}, false, err
+	}
+	return s.getDraftLocked(id)
+}
+
+func (s *Store) getDraftLocked(id string) (GoalDraft, bool, error) {
+	var d GoalDraft
+	var constraints, expected, acceptance, decisions, sources, created, updated string
+	err := s.db.QueryRow(`SELECT id,conversation_id,project_id,goal,constraints,expected_outputs,
+		acceptance,decisions,source_message_ids,context_version,status,created_at,updated_at
+		FROM goal_drafts WHERE id=?`, id).Scan(
+		&d.ID, &d.ConversationID, &d.ProjectID, &d.Goal, &constraints, &expected, &acceptance,
+		&decisions, &sources, &d.ContextVersion, &d.Status, &created, &updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return GoalDraft{}, false, nil
+	}
+	if err != nil {
+		return GoalDraft{}, false, err
+	}
+	_ = json.Unmarshal([]byte(constraints), &d.Constraints)
+	_ = json.Unmarshal([]byte(expected), &d.ExpectedOutputs)
+	_ = json.Unmarshal([]byte(acceptance), &d.Acceptance)
+	_ = json.Unmarshal([]byte(decisions), &d.Decisions)
+	_ = json.Unmarshal([]byte(sources), &d.SourceMessageIDs)
+	d.CreatedAt, d.UpdatedAt = parseTime(created), parseTime(updated)
+	return d, true, nil
+}
+
+func (s *Store) UpdateGoalDraft(d GoalDraft) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	raw := func(v any) string { b, _ := json.Marshal(v); return string(b) }
+	res, err := s.db.Exec(`UPDATE goal_drafts SET goal=?,constraints=?,expected_outputs=?,acceptance=?,
+		decisions=?,source_message_ids=?,context_version=?,updated_at=? WHERE id=? AND status='draft'`,
+		d.Goal, raw(d.Constraints), raw(d.ExpectedOutputs), raw(d.Acceptance), raw(d.Decisions),
+		raw(d.SourceMessageIDs), d.ContextVersion, now(), d.ID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("goal draft is not editable")
+	}
+	return nil
+}
+
+func (s *Store) ConfirmGoalDraft(id, objectiveID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res, err := s.db.Exec(`UPDATE goal_drafts SET status='confirmed', updated_at=? WHERE id=? AND status='draft'`,
+		now(), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("goal draft is not editable")
+	}
+	_, err = s.db.Exec(`UPDATE conversations SET objective_id=?, updated_at=? WHERE id=
+		(SELECT conversation_id FROM goal_drafts WHERE id=?)`, objectiveID, now(), id)
+	return err
+}
+
+func (s *Store) SetObjective(conversationID, objectiveID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE conversations SET objective_id=?, updated_at=? WHERE id=?`,
+		objectiveID, now(), conversationID)
+	return err
 }
 
 // PruneMessages keeps the newest N messages per conversation. Messages are the

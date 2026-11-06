@@ -107,3 +107,7 @@ kernel project decision --dir D --project proj-... --text "采用 baseline B"
 ```
 
 快照不是运行时权威；数据库才是。删除 `project-state/` 不会丢目标状态。
+
+`kernel project context --dir D --project P` 输出有界上下文（已验证事实、产物内容、
+显式决策、活跃目标、阻塞），聊天首条消息和 Planner 的 `--context` 使用同一份内容。
+注入内容明确标记为数据，不把模型推测写成项目事实。

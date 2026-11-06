@@ -10,7 +10,7 @@ import (
 
 func cmdProject(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: kernel project <list|snapshot|decision> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: kernel project <list|snapshot|decision|context> [flags]")
 		return exitError
 	}
 	switch args[0] {
@@ -20,6 +20,8 @@ func cmdProject(args []string) int {
 		return projectSnapshot(args[1:])
 	case "decision":
 		return projectDecision(args[1:])
+	case "context":
+		return projectContext(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown project command %q\n", args[0])
 		return exitError
@@ -64,6 +66,21 @@ func projectSnapshot(args []string) int {
 	fmt.Printf("project=%s objectives=%d verified=%d blockers=%d hash=%s\n",
 		snap.ProjectID, len(snap.Objectives), len(snap.Verified), len(snap.Blockers), snap.Hash[:12])
 	fmt.Printf("written to %s\n", filepath.Join(ws.root, "project-state", snap.ProjectID, ".project"))
+	return exitOK
+}
+
+func projectContext(args []string) int {
+	fs := flag.NewFlagSet("project context", flag.ContinueOnError)
+	dir := fs.String("dir", "", "workspace directory")
+	id := fs.String("project", "", "project id")
+	if err := fs.Parse(args); err != nil {
+		return exitError
+	}
+	if strings.TrimSpace(*id) == "" {
+		fmt.Fprintln(os.Stderr, "context requires --project")
+		return exitError
+	}
+	fmt.Print(newWorkspace(*dir).ProjectContextText(*id))
 	return exitOK
 }
 

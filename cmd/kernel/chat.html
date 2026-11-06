@@ -82,7 +82,16 @@
   .right .hint{font-size:11px;color:var(--muted);line-height:1.6}
   .link{color:var(--accent);text-decoration:none}
   .link:hover{text-decoration:underline}
-  .hidden{display:none!important}
+.hidden{display:none!important}
+.modal{position:fixed;inset:0;background:rgba(20,24,30,.42);display:grid;place-items:center;z-index:60;padding:1rem}
+.modal-card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 50px rgba(20,24,30,.2);
+  width:min(46rem,100%);max-height:88vh;overflow:auto;padding:1.1rem 1.2rem}
+.modal-card h2{font-size:1rem;margin:0 0 4px}
+.modal-card label{display:flex;flex-direction:column;gap:.25rem;font-size:12px;color:var(--muted);margin-top:.65rem}
+.modal-card input,.modal-card textarea{border:1px solid var(--line);border-radius:7px;padding:.45rem .55rem;font:inherit;color:var(--text);background:#fff}
+.modal-card textarea{min-height:3.2rem;resize:vertical}
+.modal-actions{display:flex;justify-content:flex-end;gap:.5rem;margin-top:.9rem}
+.modal-note{font-size:11px;color:var(--muted);line-height:1.55;margin-top:.4rem}
   @media (max-width: 1050px){.app{grid-template-columns:230px minmax(0,1fr)}.right{display:none}}
   @media (max-width: 720px){.app{grid-template-columns:1fr}.side{display:none}}
 </style>
@@ -166,6 +175,24 @@
       </div>
     </div>
   </aside>
+</div>
+
+<div class="modal hidden" id="handoffModal">
+  <div class="modal-card">
+    <h2>确认托管目标</h2>
+    <div class="modal-note">这是从当前对话提取的 Goal Handoff。请核对、删改错误理解；确认后只会创建 Objective 并生成计划，<b>不会自动执行</b>。</div>
+    <label>目标<textarea id="hGoal"></textarea></label>
+    <label>硬约束（每行一条）<textarea id="hConstraints"></textarea></label>
+    <label>预期产物（每行一条）<textarea id="hExpected"></textarea></label>
+    <label>验收标准（每行一条）<textarea id="hAcceptance"></textarea></label>
+    <label>已确认决策（每行一条）<textarea id="hDecisions"></textarea></label>
+    <div class="modal-note" id="hSource"></div>
+    <div class="modal-note" id="hError" style="color:var(--bad)"></div>
+    <div class="modal-actions">
+      <button class="btn" id="hCancel">取消</button>
+      <button class="btn primary" id="hConfirm">创建 Objective 并生成计划</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -292,7 +319,7 @@ $('newChat').onclick = newChat;
 
 async function selectConv(id){
   if(state.stream){ state.stream.abort(); state.stream = null; }
-  state.conv = null; state.detail = null; state.lastSeq = 0; state.streaming = null; state.rendered.clear(); state.lastUser = '';
+  state.conv = null; state.detail = null; state.lastSeq = 0; state.streaming = null; state.rendered.clear(); state.lastUser = ''; state.resyncCount = 0;
   $('messages').innerHTML = '<div class="empty">加载中…</div>';
   try {
     const d = await api('/api/conversations/'+encodeURIComponent(id));
@@ -318,6 +345,7 @@ async function selectConv(id){
 }
 
 function renderMessages(msgs){
+  state.rendered.clear();
   const box = $('messages'); box.innerHTML = '';
   if(!msgs.length){ box.innerHTML = '<div class="empty" id="empty">直接提问，或选择左侧历史对话。<br>需要执行任务时，点右上角“转为托管目标”。</div>'; return; }
   msgs.forEach(m => addMessage(m.role, m.text, m.id));
@@ -395,19 +423,42 @@ $('stopBtn').onclick = async () => {
 
 $('toGoalBtn').onclick = async () => {
   if(!state.conv) return;
-  const msgs = state.detail ? state.detail.messages || [] : [];
-  const lastUser = [...msgs].reverse().find(m => m.role === 'user');
-  const text = state.lastUser || (lastUser ? lastUser.text : prompt('要把哪段内容转成托管目标？'));
-  if(!text) return;
-  if(!confirm('将创建一个托管 Objective 并生成计划（不会自动执行）。继续？')) return;
+  const btn = $('toGoalBtn'); btn.disabled = true; btn.textContent = '提取目标…';
   try {
-    const res = await api('/api/goals', {method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({goal:text, title:clip(text,40), projectId: state.conv ? state.conv.projectId : ''})});
-    await api('/api/objectives/'+encodeURIComponent(res.objective)+'/plan', {method:'POST', body:'{}'});
-    location.href = '/#goal='+encodeURIComponent(res.objective);
-  } catch(e) { alert('创建目标失败：'+e.message); }
+    const d = await api('/api/conversations/'+encodeURIComponent(state.conv.id)+'/handoff', {method:'POST'});
+    state.handoff = d;
+    $('hGoal').value = d.goal || '';
+    $('hConstraints').value = (d.constraints || []).join('\n');
+    $('hExpected').value = (d.expectedOutputs || []).join('\n');
+    $('hAcceptance').value = (d.acceptance || []).join('\n');
+    $('hDecisions').value = (d.decisions || []).join('\n');
+    $('hSource').textContent = '来源消息 ' + ((d.sourceMessageIds || []).length) + ' 条 · 上下文版本 ' + (d.contextVersion || '').slice(0,12) + '…';
+    $('hError').textContent = '';
+    $('handoffModal').classList.remove('hidden');
+  } catch(e) { alert('目标提取失败：'+e.message); }
+  finally { btn.disabled = false; btn.textContent = '转为托管目标'; }
 };
-
+$('hCancel').onclick = () => $('handoffModal').classList.add('hidden');
+$('hConfirm').onclick = async () => {
+  if(!state.handoff || !state.conv) return;
+  const lines = id => $(id).value.split('\n').map(x=>x.trim()).filter(Boolean);
+  $('hConfirm').disabled = true; $('hError').textContent = '';
+  try {
+    await api('/api/conversations/'+encodeURIComponent(state.conv.id)+'/handoff/'+encodeURIComponent(state.handoff.id), {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({goal:$('hGoal').value.trim(), constraints:lines('hConstraints'),
+        expectedOutputs:lines('hExpected'), acceptance:lines('hAcceptance'), decisions:lines('hDecisions')})
+    });
+    const res = await api('/api/conversations/'+encodeURIComponent(state.conv.id)+'/handoff/'+encodeURIComponent(state.handoff.id)+'/confirm', {method:'POST'});
+    if(res.planError) {
+      $('hError').textContent = 'Objective 已创建，但计划生成失败：'+res.planError;
+      $('hConfirm').disabled = false;
+      return;
+    }
+    $('handoffModal').classList.add('hidden');
+    location.href = '/#goal='+encodeURIComponent(res.objective);
+  } catch(e) { $('hError').textContent = e.message; $('hConfirm').disabled = false; }
+};
 function startStream(id){
   const ctrl = new AbortController(); state.stream = ctrl;
   (async () => {
@@ -428,7 +479,12 @@ function startStream(id){
           let idx;
           while((idx = buf.indexOf('\n\n')) >= 0){
             const chunk = buf.slice(0, idx); buf = buf.slice(idx+2);
-            handleSSE(chunk, id, seq => { after = Math.max(after, seq); });
+            const resync = handleSSE(chunk, id, seq => { after = Math.max(after, seq); });
+            if(resync){
+              state.lastSeq = 0;
+              after = 0;
+              await resyncConversation(id);
+            }
           }
         }
       } catch(e) {
@@ -442,12 +498,14 @@ function startStream(id){
 
 function handleSSE(chunk, id, advance){
   const lines = chunk.split('\n');
-  let seq = 0, data = '';
+  let seq = 0, data = '', eventName = '';
   for(const line of lines){
+    if(line.startsWith('event:')) eventName = line.slice(6).trim();
     if(line.startsWith('id:')) seq = Number(line.slice(3).trim()) || 0;
     if(line.startsWith('data:')) data += line.slice(5).trim();
   }
-  if(!data) return;
+  if(eventName === 'resync') return true;
+  if(!data) return false;
   if(seq){
     if(state.lastSeq && seq <= state.lastSeq) return;
     state.lastSeq = seq;
@@ -487,6 +545,23 @@ function handleSSE(chunk, id, advance){
     addMessage('assistant', d.message || '聊天执行失败', '').classList.add('error');
     $('status').textContent = '错误'; $('status').className = 'badge error';
   }
+  return false;
+}
+
+async function resyncConversation(id){
+  state.resyncCount = (state.resyncCount || 0) + 1;
+  if(state.resyncCount > 3){
+    $('eventHint').textContent = '状态补偿失败，请重新打开对话';
+    return;
+  }
+  try {
+    const d = await api('/api/conversations/'+encodeURIComponent(id));
+    if(!state.conv || state.conv.id !== id) return;
+    state.detail = d;
+    state.conv = d.conversation;
+    renderMessages(d.messages || []);
+    $('eventHint').textContent = '已补偿历史，继续实时';
+  } catch(e) { $('eventHint').textContent = '补偿失败：'+e.message; }
 }
 
 function toolLabel(d){

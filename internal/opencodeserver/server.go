@@ -49,9 +49,12 @@ type Session struct {
 }
 
 type Message struct {
-	ID      string `json:"id"`
-	Type    string `json:"type"`
-	Text    string `json:"text"`
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	Text string `json:"text"`
+	Time struct {
+		Created int64 `json:"created"`
+	} `json:"time"`
 	Content []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
@@ -292,6 +295,11 @@ func parseModel(ref string) (map[string]string, error) {
 }
 
 func (s *Server) CreateSession(ctx context.Context, title, model, dir string) (Session, error) {
+	return s.CreateSessionWithPolicy(ctx, title, model, dir,
+		[]map[string]string{{"action": "*", "resource": "*", "effect": "ask"}})
+}
+
+func (s *Server) CreateSessionWithPolicy(ctx context.Context, title, model, dir string, permissions []map[string]string) (Session, error) {
 	m, err := parseModel(model)
 	if err != nil {
 		return Session{}, err
@@ -300,19 +308,30 @@ func (s *Server) CreateSession(ctx context.Context, title, model, dir string) (S
 		Data Session `json:"data"`
 	}
 	err = s.doJSON(ctx, http.MethodPost, "/api/session", map[string]any{
-		"title":    title,
-		"model":    m,
-		"location": map[string]string{"directory": dir},
-		// Interactive chat never silently edits or runs commands. The UI receives
-		// permission.asked and can approve one call at a time.
-		"permissions": []map[string]string{{"action": "*", "resource": "*", "effect": "ask"}},
+		"title":       title,
+		"model":       m,
+		"location":    map[string]string{"directory": dir},
+		"permissions": permissions,
 	}, &out)
 	return out.Data, err
 }
 
-func (s *Server) Prompt(ctx context.Context, sessionID, text string) error {
-	return s.doJSON(ctx, http.MethodPost, "/api/session/"+url.PathEscape(sessionID)+"/prompt",
-		map[string]string{"text": text}, nil)
+// Prompt sends a user message and returns the provider message id. The caller
+// can supply a stable local id so a later history sync can match the same row.
+func (s *Server) Prompt(ctx context.Context, sessionID, text, messageID string) (string, error) {
+	body := map[string]string{"text": text}
+	if messageID != "" {
+		body["id"] = messageID
+	}
+	var out struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := s.doJSON(ctx, http.MethodPost, "/api/session/"+url.PathEscape(sessionID)+"/prompt", body, &out); err != nil {
+		return "", err
+	}
+	return out.Data.ID, nil
 }
 
 func (s *Server) Messages(ctx context.Context, sessionID string, limit int) ([]Message, error) {

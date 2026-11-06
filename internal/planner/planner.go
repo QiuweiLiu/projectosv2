@@ -20,6 +20,7 @@ type Request struct {
 	Expected    string
 	MaxTasks    int
 	Feedback    string // validation error from the previous attempt
+	Context     string // bounded project context; data, not instructions
 }
 
 type Result struct {
