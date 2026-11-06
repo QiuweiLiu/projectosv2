@@ -58,8 +58,9 @@ kernel serve --dir D --stop                 # 停掉 HTTP 服务
 | GET | `/api/projects` | Project 目录（默认项目 + 已创建项目） |
 | POST | `/api/projects` | `{name,description}` 创建 Project 元数据 |
 | GET | `/api/projects/{id}` | 重建并返回项目级 `.project` 快照 |
-| GET | `/api/objectives/{id}/progress` | 确定性下一动作/阻塞分类（不调用模型） |
-| GET | `/api/objectives/{id}/metrics` | 任务/运行/审查/token/耗时指标 |
+| GET | `/api/objectives/{id}/progress` | 确定性状态、failure 分类、恢复预算（不调用模型） |
+| GET | `/api/objectives/{id}/metrics` | 任务/运行/审查/分角色 token/墙钟与累计耗时 |
+| POST | `/api/objectives/{id}/recover` | `{approve:false}` 查看恢复决定；`{approve:true}` 重排队 |
 | POST | `/api/projects/{id}/refresh` | 强制重建项目快照 |
 | POST | `/api/projects/{id}/decisions` | `{text}` 追加项目级决策并刷新 |
 
@@ -124,6 +125,12 @@ Goal Handoff 的 `confirm` 只创建 Objective 并调用 Planner 生成计划；
 
 acceptance 与 reviewer 是两次独立会话，结果都写 `reviews` 表（kind=`acceptance`），
 同版本各限一次。`--acceptance=false` 可关闭。
+
+Metrics 区分累计 Run 耗时和 Objective 墙钟耗时；存在 active Run 时 `finishedAt` 为空，
+并返回 `activeRuns`。Token 按 planner/worker/reviewer/acceptance/objective 分列，真实值与
+`usageEstimated` 分开；空 Objective、未执行计划、失败/取消 Run 均返回稳定结构。
+`firstPass`/`acceptedAfterRetry`、`recoveryCount`、`autoRecoveries`/`manualRecoveries` 用于评估恢复效果；
+planner/worker/reviewer/acceptance/objective token 分列，避免重复计算。
 
 provider 的 429/overloaded/ECONNRESET/连接中断最多重试 3 次（2s、4s 退避）；permanent
 错误、输出不可解析、session 超时不重试，仍按 fail-closed 记录阻断。

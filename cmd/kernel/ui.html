@@ -233,6 +233,15 @@ details[open] summary::before{content:"▾ "}
           <div class="bar"><span id="bar" style="width:0%"></span></div>
         </div>
 
+        <div class="card" id="recoveryCard">
+          <div class="card-head"><h2>恢复</h2></div>
+          <div id="recoveryBody" class="hint">—</div>
+          <div class="row" id="recoveryActions" style="margin-top:.5rem;display:none">
+            <button class="btn primary" id="btnRecover">重新排队</button>
+            <span class="hint" id="recoveryHint"></span>
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-head"><h2>任务</h2></div>
           <div class="graphwrap"><div class="graph" id="graph"><svg></svg></div></div>
@@ -253,6 +262,7 @@ details[open] summary::before{content:"▾ "}
         <div class="card">
           <div class="card-head"><h2>成果</h2></div>
           <div id="deliverables"><div class="hint">还没有交付文件。</div></div>
+          <div id="sharedArtifacts" class="hint"></div>
         </div>
       </section>
 
@@ -321,7 +331,9 @@ const EVENT_LABEL = {
   review_budget:'审查次数用尽', run_timeout:'执行超时', run_unknown:'执行结果未知',
   cancel_failed:'取消未完成', start_failed:'启动失败', collect_failed:'读取结果失败',
   observe_retry:'等待执行器响应', quarantine_persist_failed:'隔离状态保存失败',
-  review_unrecorded:'审查结果未保存', acceptance_not_recorded:'验收结果未保存'
+  review_unrecorded:'审查结果未保存', acceptance_not_recorded:'验收结果未保存',
+  recovery_retry:'自动恢复重试', recovery_approval_required:'恢复需要批准',
+  recovery_approved:'恢复已批准', recovery_replan:'自动重新规划', artifact_publish_error:'共享产物发布失败'
 };
 
 const ROLES = [
@@ -329,7 +341,7 @@ const ROLES = [
   ['acceptance', '验收'], ['reporter', '汇报'],
 ];
 
-const state = { control:false, objectives:[], id:null, detail:null, task:null, events:[], pending:false, report:null, reportAsked:{} };
+const state = { control:false, objectives:[], id:null, detail:null, task:null, events:[], pending:false, report:null, reportAsked:{}, progress:null };
 let detailGen = 0, taskGen = 0;
 
 function token(){ return $('token').value.trim() || localStorage.getItem('kernelToken') || ''; }
@@ -377,10 +389,10 @@ async function loadObjectives(){
 
 function selectObjective(id){
   if (state.id === id && state.detail) return;
-  state.id = id; state.task = null; state.detail = null; state.events = []; state.report = null;
+  state.id = id; state.task = null; state.detail = null; state.events = []; state.report = null; state.progress = null;
   startKernelStream(id);
   history.replaceState(null, '', '#goal=' + encodeURIComponent(id));
-  loadObjectives(); loadDetail(); loadReport(); loadEvents(); loadModels();
+  loadObjectives(); loadDetail(); loadReport(); loadEvents(); loadRecovery(); loadModels();
 }
 
 /* ---------- detail ---------- */
@@ -391,6 +403,7 @@ async function loadDetail(){
   try { d = await api('/api/objectives/' + encodeURIComponent(state.id)); } catch (e) { return; }
   if (gen !== detailGen) return;
   state.detail = d;
+  renderSharedArtifacts(d.sharedArtifacts || []);
 
   $('empty').classList.add('hidden');
   $('view').classList.remove('hidden');
@@ -409,6 +422,7 @@ async function loadDetail(){
   renderCounts(d.counts);
   renderGraph(d.tasks || []);
   updateActions(d);
+  loadRecovery();
   if (state.task) loadTask(state.task);
 }
 
@@ -516,6 +530,7 @@ async function loadReport(){
   state.report = r;
 
   renderDeliverables(r.deliverables || []);
+  renderSharedArtifacts((state.detail && state.detail.sharedArtifacts) || []);
 
   if (r.modelText) {
     $('reportText').textContent = r.modelText;
@@ -579,6 +594,60 @@ async function requestReport(auto){
     $('jobLine').textContent = auto ? '目标已完成，正在生成汇报…' : '正在生成汇报…';
   } catch (e) { if (!auto) alert(e.message); }
 }
+
+function renderSharedArtifacts(list){
+  const box = $('sharedArtifacts');
+  if (!list || !list.length) { box.innerHTML = ''; return; }
+  box.innerHTML = '<div style="margin-top:.6rem"><b>共享证据</b> ' +
+    '<span class="hint">来源 / 版本 / 哈希，只读</span></div>' +
+    list.map(e => '<div class="hint" style="margin-top:.25rem">' +
+      '<span class="mono">' + esc(e.objectiveId + '/' + e.artifactPath) + '</span> · ' +
+      esc(e.taskId || '') + ' · ' + esc(e.verificationStatus || '') +
+      (e.artifactVersion ? ' · ' + esc(e.artifactVersion.slice(0, 18)) : '') +
+      ' · <span class="mono">' + esc((e.contentSha256 || '').slice(0, 12)) + '…</span></div>').join('');
+}
+
+/* ---------- recovery ---------- */
+async function loadRecovery(){
+  if (!state.id) return;
+  let r;
+  try { r = await api('/api/objectives/' + encodeURIComponent(state.id) + '/progress'); }
+  catch (e) { $('recoveryBody').textContent = '恢复状态不可用：' + e.message; return; }
+  state.progress = r;
+  const body = $('recoveryBody'), actions = $('recoveryActions'), btn = $('btnRecover');
+  if (!r || !r.failure) {
+    body.textContent = '当前没有需要恢复的失败。';
+    actions.style.display = 'none';
+    return;
+  }
+  const f = r.failure;
+  const lines = [
+    '状态：' + r.state + (r.next ? ' · 下一步 ' + r.next : ''),
+    '失败：' + f.category + (f.taskId ? ' · 任务 ' + f.taskId : '') + (f.runId ? ' · Run ' + f.runId : ''),
+    '恢复：' + (f.recoverable ? '可自动重试' : f.requiresApproval ? '需要人工批准' : '不可自动恢复'),
+    '建议：' + (f.action || 'inspect'),
+    '预算：已用 ' + (r.recoveryCount || 0) + '/' + (r.recoveryBudget || 0) + ' 次 · ' + (r.recoveryAvailable ? '可继续' : '需人工判断'),
+  ];
+  if (f.evidence && f.evidence.length) lines.push('证据：' + f.evidence.filter(Boolean).slice(0, 3).join(' / '));
+  body.innerHTML = lines.map(x => '<div>' + esc(clip(x, 220)) + '</div>').join('');
+  const show = state.control && (f.action === 'approve' || (f.action === 'retry' && r.recoveryAvailable));
+  actions.style.display = show ? '' : 'none';
+  btn.disabled = !show || state.pending;
+  btn.textContent = f.requiresApproval ? '批准并重新排队' : '重新排队';
+  $('recoveryHint').textContent = show ? '重新排队只恢复该任务，已验收成果不会被重跑。' : '';
+}
+
+$('btnRecover').onclick = async () => {
+  if (!state.id || state.pending) return;
+  if (!confirm('确认恢复这个任务？系统会把它重新排队，随后可点击“执行”。')) return;
+  state.pending = true; $('btnRecover').disabled = true;
+  try {
+    await api('/api/objectives/' + encodeURIComponent(state.id) + '/recover',
+      {method:'POST', body: JSON.stringify({approve:true})});
+    await loadDetail(); await loadObjectives(); await loadRecovery(); await loadEvents();
+  } catch (e) { alert(e.message); }
+  finally { state.pending = false; loadRecovery(); }
+};
 
 /* ---------- graph ---------- */
 function renderGraph(tasks){
@@ -766,6 +835,9 @@ function startKernelStream(id){
       merged.set(e.seq, e);
       state.events = [...merged.values()].sort((a, b) => b.seq - a.seq).slice(0, 200);
       renderTimeline();
+      if (String(e.kind || '').startsWith('recovery_') || e.kind === 'artifact_publish_error') {
+        loadDetail(); loadRecovery();
+      }
     } catch(_) {}
   };
   state.eventStream = es;

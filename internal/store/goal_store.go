@@ -32,6 +32,11 @@ CREATE TABLE IF NOT EXISTS plans (
 	status       TEXT NOT NULL,
 	spec         TEXT NOT NULL,
 	hash         TEXT NOT NULL,
+	prompt_chars INTEGER NOT NULL DEFAULT 0,
+	output_chars INTEGER NOT NULL DEFAULT 0,
+	prompt_tokens INTEGER NOT NULL DEFAULT 0,
+	output_tokens INTEGER NOT NULL DEFAULT 0,
+	usage_estimated INTEGER NOT NULL DEFAULT 0,
 	created_at   TEXT NOT NULL,
 	confirmed_at TEXT,
 	UNIQUE (objective_id, version)
@@ -134,13 +139,29 @@ func (s *Store) BumpObjectivePlan(id string, version int) error {
 }
 
 func (s *Store) CreatePlan(objectiveID string, version int, spec goal.Plan, hash string) (string, error) {
+	return s.CreatePlanWithUsage(objectiveID, version, spec, hash, PlanUsage{})
+}
+
+type PlanUsage struct {
+	PromptChars    int
+	OutputChars    int
+	PromptTokens   int
+	OutputTokens   int
+	UsageEstimated bool
+}
+
+func (s *Store) CreatePlanWithUsage(objectiveID string, version int, spec goal.Plan, hash string, usage PlanUsage) (string, error) {
 	id := fmt.Sprintf("%s-plan-v%d", objectiveID, version)
 	raw, err := json.Marshal(spec)
 	if err != nil {
 		return "", err
 	}
-	_, err = s.db.Exec(`INSERT INTO plans (id, objective_id, version, status, spec, hash, created_at)
-		VALUES (?, ?, ?, 'draft', ?, ?, ?)`, id, objectiveID, version, string(raw), hash, now())
+	_, err = s.db.Exec(`INSERT INTO plans (id, objective_id, version, status, spec, hash,
+		prompt_chars, output_chars, prompt_tokens, output_tokens, usage_estimated, created_at)
+		VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, objectiveID, version, string(raw), hash,
+		usage.PromptChars, usage.OutputChars, usage.PromptTokens, usage.OutputTokens,
+		boolInt(usage.UsageEstimated), now())
 	if err != nil {
 		return "", fmt.Errorf("create plan v%d: %w", version, err)
 	}

@@ -195,7 +195,14 @@ func TestProjectSnapshotBuildsFromObjectiveDB(t *testing.T) {
 		Result: "done", Accepted: true}); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.MoveObjective("obj-a", goal.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
 	st.Close()
+	if err := os.WriteFile(filepath.Join(dir, "delivery.json"),
+		[]byte(`{"status":"completed","checks":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(dir, "out"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -221,6 +228,10 @@ func TestProjectSnapshotBuildsFromObjectiveDB(t *testing.T) {
 	shared, err := os.ReadFile(filepath.Join(root, "project-state", project.ID, "artifacts", "obj-a", "a.txt"))
 	if err != nil || string(shared) != "done" {
 		t.Fatalf("shared artifact = %q %v", shared, err)
+	}
+	manifest, err := readProjectManifest(root, project.ID)
+	if err != nil || len(manifest.Entries) != 1 || manifest.Entries[0].ContentSHA256 == "" {
+		t.Fatalf("manifest = %+v %v", manifest, err)
 	}
 	for _, name := range []string{"PROJECT.md", "STATE.md", "HANDOFF.md", "DECISIONS.md", "snapshot.json"} {
 		if _, err := os.Stat(filepath.Join(projectstate.ProjectDir(root, project.ID), name)); err != nil {
@@ -287,11 +298,22 @@ func TestSeedProjectArtifacts(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "project.json"), []byte(`{"id":"proj-1"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	shared := filepath.Join(root, "project-state", "proj-1", "artifacts", "obj-a")
+	artifactRoot := filepath.Join(root, "project-state", "proj-1", "artifacts")
+	shared := filepath.Join(artifactRoot, "obj-a")
 	if err := os.MkdirAll(shared, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(shared, "hello.txt"), []byte("hello world"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := ArtifactManifest{Version: artifactManifestVersion, ProjectID: "proj-1",
+		GeneratedAt: time.Now().UTC(), Entries: []ArtifactEntry{{
+			ProjectID: "proj-1", ObjectiveID: "obj-a", TaskID: "T1", ArtifactPath: "hello.txt",
+			ContentSHA256:      "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+			VerificationStatus: "verified",
+		}}}
+	raw, _ := json.Marshal(manifest)
+	if err := os.WriteFile(filepath.Join(artifactRoot, "MANIFEST.json"), raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := seedProjectArtifacts(dir); err != nil {

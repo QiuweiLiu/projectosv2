@@ -65,7 +65,8 @@ func (m *Model) Plan(ctx context.Context, req Request) (Result, error) {
 		return Result{}, cerr
 	}
 	plan, perr := Parse(artifact.Result)
-	result := Result{Plan: plan, Raw: artifact.Result, PromptChars: artifact.PromptChars, OutputChars: artifact.OutputChars}
+	result := Result{Plan: plan, Raw: artifact.Result, PromptChars: artifact.PromptChars, OutputChars: artifact.OutputChars,
+		PromptTokens: artifact.PromptTokens, OutputTokens: artifact.OutputTokens, UsageEstimated: artifact.UsageEstimated}
 	if perr != nil {
 		return result, perr
 	}

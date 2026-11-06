@@ -62,3 +62,9 @@ Schema/DAG 校验之后还有一层 `ValidateImplementationChecks`：`exact`/`co
 
 多次规划失败时错误按 attempt 聚合，不会让“fake planner has no plan left”之类的后续错误
 覆盖第一次真实的 schema/语义拒绝。
+
+## 恢复与计划
+
+失败后的自动恢复不改变计划语义：`artifact_mismatch`/`review_blocked` 只重排队原 Task，
+并把原始错误保留到重试提示词；`dependency_failure` 才进入现有 bounded replanner。
+计划版本、已验收 Task 和产物所有权仍由 Kernel 校验。

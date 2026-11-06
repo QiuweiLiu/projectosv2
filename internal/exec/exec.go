@@ -87,6 +87,9 @@ type FakeBackend struct {
 	// Starts records every StartRequest so tests can inspect the prompt a retry
 	// actually received.
 	Starts []StartRequest
+	// ScriptedOutput overrides Output for a specific attempt. It lets recovery
+	// tests fail verification once and succeed on the retry without a model.
+	ScriptedOutput map[domain.TaskID]map[int]string
 
 	mu       sync.Mutex
 	pending  map[string]int
@@ -113,7 +116,13 @@ func (f *FakeBackend) Start(_ context.Context, req StartRequest) (StartResult, e
 	f.Starts = append(f.Starts, req)
 	id := fmt.Sprintf("fake-%s-%d", req.TaskID, req.Attempt)
 	f.pending[id] = f.Ticks
-	f.results[id] = f.Output[req.TaskID]
+	result := f.Output[req.TaskID]
+	if byAttempt, ok := f.ScriptedOutput[req.TaskID]; ok {
+		if value, ok := byAttempt[req.Attempt]; ok {
+			result = value
+		}
+	}
+	f.results[id] = result
 	f.versions[id] = "fake:" + id
 	if files, ok := f.Files[req.TaskID]; ok {
 		f.files[id] = files

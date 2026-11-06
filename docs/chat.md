@@ -48,6 +48,9 @@ SSE 订阅会分页回放，最多 4096 条；超过上限、事件已被清理�
 服务重启或事件流重连后，Manager 会调用 `/api/permission/request` 主动补拉 pending
 permission，因此工具批准不会因为一次断线永久悬挂。
 
+聊天首条消息使用查询相关的 Evidence Context（`docs/evidence.md`）：只注入已验收产物、
+显式决策和活跃/阻塞状态；文件正文以数据块引用，未验证输出不会成为项目事实。
+
 ## 工具权限
 
 聊天 Session 的权限规则是“全部 ask”。写文件、执行命令会在 `/chat` 右侧/消息流中

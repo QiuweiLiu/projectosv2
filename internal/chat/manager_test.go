@@ -197,7 +197,7 @@ func TestSlowConsumerGetsResyncSignal(t *testing.T) {
 
 func TestPromptContextInjectedOnce(t *testing.T) {
 	c := conversation.Conversation{ProjectID: "proj-1"}
-	provider := func(string) string { return "Verified: hello.txt" }
+	provider := func(string, string) string { return "Verified: hello.txt" }
 	first := promptWithContext("do it", c, provider)
 	if !strings.Contains(first, "hello.txt") || !strings.Contains(first, "User request") {
 		t.Fatalf("first = %q", first)

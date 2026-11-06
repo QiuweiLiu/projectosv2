@@ -90,3 +90,31 @@ func TestActiveRunsRejectsBadTimestamp(t *testing.T) {
 		t.Fatal("a bad timestamp must be an error, not a zero time")
 	}
 }
+
+// A cancellation racing with a successful completion must not rewrite the
+// accepted task. The first settlement wins; the late one is stale.
+func TestLateCancelledResultCannotOverwriteAccepted(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "k.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.CreateTask(domain.Task{ID: "A", Validator: "v"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := s.Claim("A", "run-1", "fake"); !ok {
+		t.Fatal("claim failed")
+	}
+	if _, err := s.SettleRun(store.Settlement{RunID: "run-1", RunStatus: domain.RunSucceeded,
+		Accepted: true, Result: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SettleRun(store.Settlement{RunID: "run-1", RunStatus: domain.RunCancelled,
+		Note: "cancelled"}); !errors.Is(err, store.ErrStaleRun) {
+		t.Fatalf("late cancel err = %v, want ErrStaleRun", err)
+	}
+	task, _, _ := s.Get("A")
+	if task.Status != domain.TaskAccepted {
+		t.Fatalf("task = %s, want accepted", task.Status)
+	}
+}

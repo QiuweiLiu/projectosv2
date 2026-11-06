@@ -108,14 +108,14 @@ kernel project decision --dir D --project proj-... --text "采用 baseline B"
 
 快照不是运行时权威；数据库才是。删除 `project-state/` 不会丢目标状态。
 
-`kernel project context --dir D --project P` 输出有界上下文（已验证事实、产物内容、
-显式决策、活跃目标、阻塞），聊天首条消息和 Planner 的 `--context` 使用同一份内容。
-注入内容明确标记为数据，不把模型推测写成项目事实。
+`kernel project context --dir D --project P` 输出有界 Evidence Context（已验证产物、
+显式决策、活跃/阻塞状态），聊天首条消息和 Planner 的 `--context` 使用查询相关的同一套
+选择逻辑（见 `docs/evidence.md`）。注入内容明确标记为数据，不把模型推测写成项目事实。
 
 
 ## 跨 Objective 只读产物
 
-`project-state/<projectID>/artifacts/<objectiveID>/<path>` 保存已交付产物的只读副本。
-新 Objective 启动时会把该目录复制到任务种子的 `repo/project-artifacts/`，worker 可以
-直接读取；Planner/聊天上下文同时列出这些路径。副本有大小上限，符号链接跳过；各
-Objective 以 ID 分目录，不能互相覆盖。它仍是派生数据，数据库/交付目录才是权威。
+见 `docs/artifacts.md`：只有 completed + delivery 完成 + 数据哈希一致的 accepted Task
+才能发布到 `project-state/<projectID>/artifacts/`；Manifest 记录来源、版本、哈希。
+`out/` 中的额外文件不会被自动信任。Worker 只拿到 `repo/project-artifacts/` 的校验副本，
+修改副本不会影响权威证据。

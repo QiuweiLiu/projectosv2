@@ -229,6 +229,19 @@ func (s *Store) migrate() error {
 			}
 		}
 	}
+	for name, ddl := range map[string]string{
+		"prompt_chars":    "ALTER TABLE plans ADD COLUMN prompt_chars INTEGER NOT NULL DEFAULT 0",
+		"output_chars":    "ALTER TABLE plans ADD COLUMN output_chars INTEGER NOT NULL DEFAULT 0",
+		"prompt_tokens":   "ALTER TABLE plans ADD COLUMN prompt_tokens INTEGER NOT NULL DEFAULT 0",
+		"output_tokens":   "ALTER TABLE plans ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0",
+		"usage_estimated": "ALTER TABLE plans ADD COLUMN usage_estimated INTEGER NOT NULL DEFAULT 0",
+	} {
+		if ok, err := s.hasColumn("plans", name); err == nil && !ok {
+			if _, err := s.db.Exec(ddl); err != nil {
+				return fmt.Errorf("migrate plans.%s: %w", name, err)
+			}
+		}
+	}
 	return nil
 }
 
@@ -1020,6 +1033,19 @@ func (s *Store) UsageChars() (prompt, output int, err error) {
 		prompt += rp
 		output += ro
 	}
+	plansOK, err := s.hasColumn("plans", "prompt_chars")
+	if err != nil {
+		return 0, 0, err
+	}
+	if plansOK {
+		var pp, po int
+		if err := s.db.QueryRow(`SELECT COALESCE(SUM(prompt_chars),0), COALESCE(SUM(output_chars),0) FROM plans`).
+			Scan(&pp, &po); err != nil {
+			return 0, 0, err
+		}
+		prompt += pp
+		output += po
+	}
 	return prompt, output, nil
 }
 
@@ -1081,7 +1107,11 @@ func (s *Store) UsageTokens() (prompt, output int, estimated bool, err error) {
 	if err != nil {
 		return 0, 0, false, err
 	}
-	return rp + vrp, ro + vro, re || vre, nil
+	pp, po, pe, err := sum("plans")
+	if err != nil {
+		return 0, 0, false, err
+	}
+	return rp + vrp + pp, ro + vro + po, re || vre || pe, nil
 }
 
 func boolInt(v bool) int {
@@ -1237,4 +1267,149 @@ func (s *Store) Events() ([]domain.Event, error) {
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// RunsForTask returns every attempt for one task, oldest first. Progress and
+// recovery use the persisted Run status instead of guessing from prose.
+func (s *Store) RunsForTask(taskID domain.TaskID) ([]domain.Run, error) {
+	rows, err := s.db.Query(`SELECT id, task_id, attempt, backend, status, result, evidence, external_id, started_at
+		FROM runs WHERE task_id=? ORDER BY attempt, started_at`, string(taskID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.Run
+	for rows.Next() {
+		var r domain.Run
+		var started string
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.Attempt, &r.Backend, &r.Status, &r.Result, &r.Evidence, &r.ExternalID, &started); err != nil {
+			return nil, err
+		}
+		if r.StartedAt, err = time.Parse(time.RFC3339Nano, started); err != nil {
+			return nil, fmt.Errorf("run %s: bad started_at %q: %w", r.ID, started, err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// RequeueBlocked is the only Kernel-approved way to resume a blocked task. It
+// never touches accepted, running or superseded tasks, and grows the attempt
+// cap by exactly one so a recovery loop is bounded.
+func (s *Store) RequeueBlocked(taskID domain.TaskID, reason string, attemptCap int) (bool, error) {
+	if strings.TrimSpace(string(taskID)) == "" {
+		return false, fmt.Errorf("requeue needs a task id")
+	}
+	if attemptCap <= 0 {
+		return false, fmt.Errorf("requeue needs a positive attempt cap")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var status string
+	var max int
+	if err := tx.QueryRow(`SELECT status, max_attempts FROM tasks WHERE id=?`, string(taskID)).
+		Scan(&status, &max); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, fmt.Errorf("unknown task %s", taskID)
+		}
+		return false, err
+	}
+	if status != string(domain.TaskBlocked) && status != string(domain.TaskRejected) {
+		return false, nil
+	}
+	if max >= attemptCap {
+		return false, nil
+	}
+	res, err := tx.Exec(`UPDATE tasks SET status=?, max_attempts=?,
+		last_error=CASE WHEN last_error='' THEN ? ELSE last_error END
+		WHERE id=? AND status IN (?, ?)`,
+		string(domain.TaskPending), max+1, reason, string(taskID),
+		string(domain.TaskBlocked), string(domain.TaskRejected))
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	if n != 1 {
+		return false, nil
+	}
+	if err := reopenDependencyBlocks(tx); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// reopenDependencyBlocks reverses BlockDependents after a recovery requeue. It
+// only touches tasks whose sole reason was an upstream block; a task with an
+// independent failure keeps its own blocked state.
+func reopenDependencyBlocks(tx *sql.Tx) error {
+	for round := 0; round < 8; round++ {
+		rows, err := tx.Query(`SELECT id FROM tasks
+			WHERE status IN ('blocked','rejected') AND last_error LIKE 'dependency blocked%' ORDER BY id`)
+		if err != nil {
+			return err
+		}
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		changed := 0
+		for _, id := range ids {
+			deps, err := tx.Query(`SELECT depends_on FROM task_deps WHERE task_id=?`, id)
+			if err != nil {
+				return err
+			}
+			ok := true
+			for deps.Next() {
+				var dep string
+				if err := deps.Scan(&dep); err != nil {
+					deps.Close()
+					return err
+				}
+				var status string
+				if err := tx.QueryRow(`SELECT status FROM tasks WHERE id=?`, dep).Scan(&status); err != nil {
+					if errors.Is(err, sql.ErrNoRows) {
+						ok = false
+						continue
+					}
+					deps.Close()
+					return err
+				}
+				if status == string(domain.TaskBlocked) || status == string(domain.TaskRejected) ||
+					status == string(domain.TaskSuperseded) {
+					ok = false
+				}
+			}
+			deps.Close()
+			if !ok {
+				continue
+			}
+			res, err := tx.Exec(`UPDATE tasks SET status=?, last_error=''
+				WHERE id=? AND status IN ('blocked','rejected') AND last_error LIKE 'dependency blocked%'`,
+				string(domain.TaskPending), id)
+			if err != nil {
+				return err
+			}
+			n, _ := res.RowsAffected()
+			changed += int(n)
+		}
+		if changed == 0 {
+			return nil
+		}
+	}
+	return nil
 }

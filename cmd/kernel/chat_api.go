@@ -375,7 +375,7 @@ func chatConfirmHandoff(w http.ResponseWriter, r *http.Request, ctl *controlServ
 		return
 	}
 	args := []string{"goal", "plan", "--dir", p.Dir, "--planner", "model"}
-	if contextText := ws.ProjectContextText(p.ProjectID); contextText != "" {
+	if contextText := ws.ProjectContextFor(p.ProjectID, d.Goal); contextText != "" {
 		args = append(args, "--context", contextText)
 	}
 	planErr := ""

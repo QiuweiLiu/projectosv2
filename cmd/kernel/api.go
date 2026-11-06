@@ -119,6 +119,7 @@ type objectiveDetail struct {
 	RequiresApproval  bool               `json:"requiresApproval"`
 	ApprovalReasons   []string           `json:"approvalReasons,omitempty"`
 	ObjectiveFindings []domain.Finding   `json:"objectiveFindings,omitempty"`
+	SharedArtifacts   []ArtifactEntry    `json:"sharedArtifacts,omitempty"`
 }
 
 type planRow struct {
@@ -158,6 +159,13 @@ func serveObjectiveDetail(w http.ResponseWriter, st *store.Store, dir, id string
 		return
 	}
 	detail := objectiveDetail{Objective: obj, Delivery: deliveryPresent(dir)}
+	if manifest, err := readManifestForObjective(dir); err == nil {
+		for _, entry := range manifest.Entries {
+			if entry.ObjectiveID == id {
+				detail.SharedArtifacts = append(detail.SharedArtifacts, entry)
+			}
+		}
+	}
 	// A plan exists before it is confirmed, but PlanVersion only moves on
 	// confirm. Fall back to the latest plan so the cockpit can show a proposal
 	// that is still waiting for a human.

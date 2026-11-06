@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"projectos/kernel/internal/goal"
 	"projectos/kernel/internal/store"
+	"projectos/kernel/internal/verify"
 )
 
 func TestOpenMigratesOldRunsTable(t *testing.T) {
@@ -110,5 +112,32 @@ func TestReadOnlyWithoutMetaTable(t *testing.T) {
 	value, err := ro.GetMeta("objective_hash")
 	if err != nil || value != "" {
 		t.Fatalf("missing meta table must read as empty: %q %v", value, err)
+	}
+}
+
+func TestOpenMigratesOldPlansTable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = raw.Exec(`CREATE TABLE plans (
+		id TEXT PRIMARY KEY, objective_id TEXT, version INTEGER, status TEXT,
+		spec TEXT, hash TEXT, created_at TEXT, confirmed_at TEXT)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw.Close()
+
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("open should migrate plans: %v", err)
+	}
+	defer st.Close()
+	if _, err := st.CreatePlanWithUsage("obj-1", 1, goal.Plan{Tasks: []goal.PlanTask{{
+		ID: "T1", Goal: "g", Artifacts: []string{"a.txt"}, Risk: "low",
+		Validators: []verify.Spec{{Type: "nonempty"}},
+	}}}, "h", store.PlanUsage{PromptTokens: 1}); err != nil {
+		t.Fatalf("create plan after migration: %v", err)
 	}
 }

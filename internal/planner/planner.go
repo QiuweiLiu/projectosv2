@@ -25,10 +25,13 @@ type Request struct {
 }
 
 type Result struct {
-	Plan        goal.Plan
-	Raw         string
-	PromptChars int
-	OutputChars int
+	Plan           goal.Plan
+	Raw            string
+	PromptChars    int
+	OutputChars    int
+	PromptTokens   int
+	OutputTokens   int
+	UsageEstimated bool
 }
 
 type Planner interface {

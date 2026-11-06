@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"projectos/kernel/internal/planner"
 	"projectos/kernel/internal/progress"
 	"projectos/kernel/internal/projectstate"
+	"projectos/kernel/internal/recovery"
 	"projectos/kernel/internal/replan"
 	"projectos/kernel/internal/report"
 	"projectos/kernel/internal/store"
@@ -101,7 +103,7 @@ func resolveRoleModel(dir, role, explicit string) string {
 
 func cmdGoal(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: kernel goal <create|plan|show|confirm|run|status|progress|export|resume|cancel|pause|unpause|report|explain|continue|models|prune> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: kernel goal <create|plan|show|confirm|run|status|progress|recover|metrics|export|resume|cancel|pause|unpause|report|explain|continue|models|prune> [flags]")
 		return exitError
 	}
 	switch args[0] {
@@ -119,6 +121,10 @@ func cmdGoal(args []string) int {
 		return goalStatus(args[1:])
 	case "progress":
 		return goalProgress(args[1:])
+	case "recover":
+		return goalRecover(args[1:])
+	case "metrics":
+		return goalMetrics(args[1:])
 	case "export":
 		return goalExport(args[1:])
 	case "resume":
@@ -291,7 +297,7 @@ func goalPlan(args []string) int {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	plan, _, err := planner.Generate(ctx, p, planner.Request{Goal: obj.Goal, Constraints: obj.Constraints,
+	plan, result, err := planner.Generate(ctx, p, planner.Request{Goal: obj.Goal, Constraints: obj.Constraints,
 		Expected: obj.ExpectedOutcome, MaxTasks: *maxTasks, Context: *projectContext}, 2) // no host path: the model plans relative to the task workspace
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "planner:", err)
@@ -311,7 +317,11 @@ func goalPlan(args []string) int {
 	if ok {
 		version = latest.Version + 1
 	}
-	if _, err := st.CreatePlan(obj.ID, version, plan, hash); err != nil {
+	if _, err := st.CreatePlanWithUsage(obj.ID, version, plan, hash, store.PlanUsage{
+		PromptChars: result.PromptChars, OutputChars: result.OutputChars,
+		PromptTokens: result.PromptTokens, OutputTokens: result.OutputTokens,
+		UsageEstimated: result.UsageEstimated,
+	}); err != nil {
 		fmt.Fprintln(os.Stderr, "save plan:", err)
 		return exitError
 	}
@@ -442,6 +452,10 @@ func goalRun(args []string) int {
 	clearQuarantine := fs.Bool("clear-quarantine", false, "clear a persisted quarantine before running")
 	approveRisk := fs.Bool("approve-risk", false, "approve high-risk tasks and command validators before running")
 	fakeFail := fs.String("fake-fail", "", "comma-separated task ids to fail (fake executor only)")
+	fakeOutput := fs.String("fake-output", "", "task:attempt=text overrides for the fake executor")
+	fakeTicks := fs.Int("fake-ticks", 1, "observations before a fake run completes")
+	recoverOn := fs.Bool("recover", true, "bounded automatic recovery after a blocked task")
+	maxRecoveries := fs.Int("max-recoveries", 2, "maximum automatic recovery actions per objective")
 	replanOn := fs.Bool("replan", false, "allow one bounded replan after a failure")
 	maxReplans := fs.Int("max-replans", 1, "maximum replans per run")
 	replanPlan := fs.String("replan-plan-file", "", "replacement plan JSON for the fake replanner")
@@ -484,6 +498,7 @@ func goalRun(args []string) int {
 		fmt.Fprintln(os.Stderr, "confirmed plan not found")
 		return exitError
 	}
+	_ = st.SetMeta("recovery_budget", strconv.Itoa(*maxRecoveries))
 	if err := compile.ValidatePlanForKernel(plan.Spec); err != nil {
 		fmt.Fprintln(os.Stderr, "plan invalid:", err)
 		return exitError
@@ -508,12 +523,32 @@ func goalRun(args []string) int {
 	var projectID string
 	cleanup := func() {}
 	if *executor == "fake" {
-		fake := exec.NewFake(1)
+		fake := exec.NewFake(*fakeTicks)
 		fillFakeOutputs(fake, plan.Spec)
 		for _, id := range strings.Split(*fakeFail, ",") {
 			id = strings.TrimSpace(id)
 			if id != "" {
 				fake.Fail[domain.TaskID(id)] = true
+			}
+		}
+		if strings.TrimSpace(*fakeOutput) != "" {
+			fake.ScriptedOutput = map[domain.TaskID]map[int]string{}
+			for _, item := range strings.Split(*fakeOutput, ",") {
+				key, value, ok := strings.Cut(strings.TrimSpace(item), "=")
+				if !ok {
+					fmt.Fprintln(os.Stderr, "fake-output must be task:attempt=text")
+					return exitError
+				}
+				task, attemptText, ok := strings.Cut(key, ":")
+				attempt, err := strconv.Atoi(attemptText)
+				if !ok || err != nil {
+					fmt.Fprintln(os.Stderr, "fake-output must be task:attempt=text")
+					return exitError
+				}
+				if fake.ScriptedOutput[domain.TaskID(task)] == nil {
+					fake.ScriptedOutput[domain.TaskID(task)] = map[int]string{}
+				}
+				fake.ScriptedOutput[domain.TaskID(task)][attempt] = value
 			}
 		}
 		backend = fake
@@ -605,6 +640,7 @@ func goalRun(args []string) int {
 	defer cancel()
 	replans := 0
 	paused := false
+	needsApproval := len(approvalReasons(plan.Spec)) > 0
 	for {
 		if reason, cancelled := takeCancelRequest(*dir); cancelled {
 			abortCtx, abortCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -691,6 +727,55 @@ func goalRun(args []string) int {
 			code := finishGoal(st, obj, current, *dir)
 			_, _ = pruneWork(*dir, *keepWork)
 			return code
+		}
+		if *recoverOn {
+			decision, derr := recovery.Decide(st, obj, needsApproval,
+				recovery.Policy{MaxRecoveries: *maxRecoveries, AttemptCap: 3, ReplansLeft: *maxReplans - replans})
+			if derr != nil {
+				fmt.Fprintln(os.Stderr, "recovery:", derr)
+				return exitError
+			}
+			switch decision.Action {
+			case "retry":
+				ok, rerr := st.RequeueBlocked(domain.TaskID(decision.TaskID), "recovery: "+decision.Reason, 3)
+				if rerr != nil || !ok {
+					fmt.Fprintf(os.Stderr, "recovery requeue %s: ok=%v err=%v\n", decision.TaskID, ok, rerr)
+					break
+				}
+				count, _ := recovery.Increment(st)
+				_ = recovery.ClearPending(st)
+				_ = st.AppendEvent(domain.TaskID(decision.TaskID), "recovery_retry",
+					fmt.Sprintf("%s (count %d/%d)", decision.Reason, count, *maxRecoveries))
+				fmt.Printf("recovery: retrying %s (%s) count=%d/%d\n", decision.TaskID, decision.Reason, count, *maxRecoveries)
+				continue
+			case "approve":
+				if err := recovery.SetPending(st, decision); err != nil {
+					fmt.Fprintln(os.Stderr, "recovery pending:", err)
+					return exitError
+				}
+				_ = st.AppendEvent("", "recovery_approval_required", decision.Reason)
+				fmt.Printf("recovery: approval required for %s (%s)\n", decision.TaskID, decision.Reason)
+				fmt.Printf("review it, then run: kernel goal recover --dir %s --approve\n", *dir)
+				_, _ = pruneWork(*dir, *keepWork)
+				return exitBlocked
+			case "replan":
+				// Fall through to the existing bounded replanner below.
+			default:
+				if decision.Category == "unknown_execution_state" {
+					if err := recovery.SetPending(st, decision); err != nil {
+						fmt.Fprintln(os.Stderr, "recovery pending:", err)
+						return exitError
+					}
+					_ = st.AppendEvent("", "recovery_approval_required", "outcome unknown; inspect before requeue")
+					fmt.Printf("recovery: outcome unknown for %s; refusing to retry automatically\n", decision.TaskID)
+					fmt.Printf("after checking side effects, run: kernel goal recover --dir %s --approve --task %s\n", *dir, decision.TaskID)
+					_, _ = pruneWork(*dir, *keepWork)
+					return exitBlocked
+				}
+				code := failGoal(st, obj, current)
+				_, _ = pruneWork(*dir, *keepWork)
+				return code
+			}
 		}
 		if !*replanOn || replans >= *maxReplans {
 			code := failGoal(st, obj, current)
@@ -856,6 +941,15 @@ func finishGoal(st *store.Store, obj goal.Objective, tasks []domain.Task, dir st
 		return exitError
 	}
 
+	// Publish only after the completion fact is durable. A publish failure is
+	// reported but must not rewrite an already completed objective.
+	if !broken {
+		if err := publishProjectArtifactsForDir(dir); err != nil {
+			fmt.Fprintln(os.Stderr, "shared artifacts:", err)
+			_ = st.AppendEvent("", "artifact_publish_error", err.Error())
+		}
+	}
+
 	if broken {
 		for _, c := range failed {
 			fmt.Printf("delivery check failed: %s `%s`: %s\n", c.TaskID, c.Command, c.Message)
@@ -939,6 +1033,28 @@ func goalProgress(args []string) int {
 	if r.FailureClass != "" {
 		fmt.Printf("failure=%s action=%s\n", r.FailureClass, r.SuggestedAction)
 	}
+	return exitOK
+}
+
+func goalMetrics(args []string) int {
+	fs := flag.NewFlagSet("goal metrics", flag.ContinueOnError)
+	dir := fs.String("dir", "", "state directory")
+	if err := fs.Parse(args); err != nil {
+		return exitError
+	}
+	st, err := openGoalStoreRead(*dir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "store:", err)
+		return exitError
+	}
+	defer st.Close()
+	m, err := st.Metrics()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "metrics:", err)
+		return exitError
+	}
+	raw, _ := json.MarshalIndent(m, "", "  ")
+	fmt.Println(string(raw))
 	return exitOK
 }
 
@@ -1652,5 +1768,103 @@ func goalModels(args []string) int {
 	} else {
 		fmt.Println("known models: none cached; run with --refresh")
 	}
+	return exitOK
+}
+
+func goalRecover(args []string) int {
+	fs := flag.NewFlagSet("goal recover", flag.ContinueOnError)
+	dir := fs.String("dir", "", "state directory")
+	approve := fs.Bool("approve", false, "approve exactly the pending recovery action")
+	taskOverride := fs.String("task", "", "explicit task id to requeue after human inspection")
+	if err := fs.Parse(args); err != nil {
+		return exitError
+	}
+	st, err := openGoalStore(*dir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "store:", err)
+		return exitError
+	}
+	defer st.Close()
+	obj, ok, err := singleObjective(st)
+	if err != nil || !ok {
+		fmt.Fprintln(os.Stderr, "no objective in this state dir")
+		return exitError
+	}
+	plan, hasPlan, err := st.GetPlan(obj.ID, obj.PlanVersion)
+	if err != nil || !hasPlan {
+		fmt.Fprintln(os.Stderr, "confirmed plan not found")
+		return exitError
+	}
+	needsApproval := len(approvalReasons(plan.Spec)) > 0
+	pending, hasPending, err := recovery.GetPending(st)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "recovery:", err)
+		return exitError
+	}
+	decision, err := recovery.Decide(st, obj, needsApproval,
+		recovery.Policy{MaxRecoveries: recovery.Budget(st), AttemptCap: 3, ReplansLeft: 1})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "recovery:", err)
+		return exitError
+	}
+	if !*approve {
+		report, rerr := progress.Assess(st, obj, needsApproval)
+		if rerr == nil {
+			fmt.Println(report)
+		}
+		if hasPending {
+			fmt.Printf("pending approval: task=%s category=%s reason=%s\n",
+				pending.TaskID, pending.Category, pending.Reason)
+		} else {
+			fmt.Printf("decision: action=%s task=%s category=%s reason=%s\n",
+				decision.Action, decision.TaskID, decision.Category, decision.Reason)
+		}
+		if decision.Action == "retry" || decision.Action == "approve" {
+			fmt.Printf("approve with: kernel goal recover --dir %s --approve\n", *dir)
+		}
+		return exitOK
+	}
+	taskID := decision.TaskID
+	reason := decision.Reason
+	if hasPending {
+		taskID, reason = pending.TaskID, pending.Reason
+	}
+	if strings.TrimSpace(*taskOverride) != "" {
+		taskID, reason = strings.TrimSpace(*taskOverride), "explicit human approval after inspection"
+	}
+	if taskID == "" {
+		fmt.Fprintln(os.Stderr, "no pending or recoverable failure")
+		return exitBlocked
+	}
+	if decision.Action == "stop" && !hasPending && strings.TrimSpace(*taskOverride) == "" {
+		fmt.Fprintln(os.Stderr, "recovery is not allowed:", reason)
+		return exitBlocked
+	}
+	ok, err = st.RequeueBlocked(domain.TaskID(taskID), "recovery approved: "+reason, 3)
+	if err != nil || !ok {
+		fmt.Fprintf(os.Stderr, "requeue %s: ok=%v err=%v\n", taskID, ok, err)
+		return exitBlocked
+	}
+	count, _ := recovery.Increment(st)
+	if err := recovery.ClearPending(st); err != nil {
+		fmt.Fprintln(os.Stderr, "clear recovery pending:", err)
+	}
+	if obj.Status == goal.StatusFailed {
+		// A human explicitly approved resuming after inspecting the failure.
+		if err := st.MoveObjective(obj.ID, goal.StatusDraft); err != nil {
+			fmt.Fprintln(os.Stderr, "reactivate objective:", err)
+			return exitError
+		}
+		if err := st.MoveObjective(obj.ID, goal.StatusPlanned); err != nil {
+			fmt.Fprintln(os.Stderr, "reactivate objective:", err)
+			return exitError
+		}
+		if err := st.MoveObjective(obj.ID, goal.StatusActive); err != nil {
+			fmt.Fprintln(os.Stderr, "reactivate objective:", err)
+			return exitError
+		}
+	}
+	_ = st.AppendEvent(domain.TaskID(taskID), "recovery_approved", reason)
+	fmt.Printf("recovery approved for %s (count %d); run `kernel goal run --dir %s`\n", taskID, count, *dir)
 	return exitOK
 }

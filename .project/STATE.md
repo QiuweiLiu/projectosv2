@@ -1,12 +1,13 @@
 # State
 
 ## Stage
-P3 + P4 最小完成：验收缓存、remote-id 同步、SSE resync、Goal Handoff、Project Context；
-P4 增加计划机器检查进 prompt、权限补拉、跨 Objective 共享产物、确定性 Progress、
-Objective metrics。P3.3 智能干预/P3.5 重故障注入仍部分。Kernel 仍是唯一 Task/Run 权威。
+P5 完成：Metrics 生命周期/墙钟/分角色 token；共享产物 Manifest 与完成门禁；结构化
+Progress；有界自动恢复（retry/replan/approval/unknown 阻断）；按需 Evidence Context；
+Cockpit 恢复/证据展示；SSE 游标恢复。P3.5 磁盘满等极端故障仍未注入。
+Kernel 仍是唯一 Task/Run 权威；Recovery 只调用 Store 转换与现有 replanner。
 
 ## Verified
-- **222 项测试 + `-race` + `vet` 全绿**；真实运行后无残留进程。
+- **266 项测试 + `-race` + `vet` 全绿**；真实运行后无残留进程。
 - **场景 A**：待办应用 3 任务，`node test.js` 验收，`out/` 组装后 11–14 项测试通过。
 - **场景 B**：sales.csv → summarize.js → summary.md，总额 60（一次通过，0 阻断）。
 - **场景 C**：真实模型重规划（T1 失败 → T1-fix → 完成）。
@@ -66,6 +67,10 @@ Objective metrics。P3.3 智能干预/P3.5 重故障注入仍部分。Kernel 仍
   Planner 计划（仍需二次确认）。真实 notes 目标完成 handoff→执行→验收→交付。
 - **P3.2**：Project Context Builder 进入聊天首条消息与 Planner `--context`，包含已验证产物内容、
   决策、活跃目标、阻塞；项目快照从目标库重建。
+- **P5 真实验证**：Metrics 空/计划/运行/失败/并发/完成 + token 分角色；共享产物未完成不发布、
+  `out` 篡改不被信任、哈希/路径/并发/旧树保护；场景 A 自动恢复（T1 失败→重试→T2 继续→交付）；
+  场景 B 三个同 Project Objective：A fake 结果 → B 真实 worker 读共享并写 `metric_b=42` →
+  C 真实 worker 汇总；场景 C kill -9 后 Run unknown，拒绝自动重试，人工批准后重排队完成。
 - **P2**：多目标 Workspace、执行前审批、文本 diff、`--session` 续跑、work 保留 20、token 实测优先、
   macOS 原生外壳（WKWebView）。
 - **聊天**：Conversation SQLite、OpenCode v2 Session/SSE、工具 ask 审批、历史同步、Project 过滤。
@@ -76,6 +81,6 @@ Objective metrics。P3.3 智能干预/P3.5 重故障注入仍部分。Kernel 仍
 - 会话续跑只续对话上下文，不续工作目录；重试仍在新目录。
 - 聊天事件只保留最近 500 条/对话；`text_delta` 不持久化；消息历史无级联清理。
 - 托管任务仍是执行前审批，不是逐工具拦截；command 不是沙箱。
-- 项目级上下文已注入聊天/Planner；Goal Draft 对聊天元指令的过滤仍需模型质量验证。
-- 未做：Windows/Linux、托管任务逐工具审批、二进制行级 diff、P3.5 磁盘/SQLite 故障注入。
-- 未注入：取消与调度器完成的进程级交错、磁盘满/只读挂载、运行中 SQLite 失效。
+- Recovery 诊断是确定性的，没有模型辅助诊断；unknown 只允许人工显式恢复。
+- 未做：Windows/Linux、逐工具审批、二进制行级 diff、日志轮转。
+- 未注入：磁盘满、只读挂载、运行中 SQLite 失效、OpenCode Server 退出重连。

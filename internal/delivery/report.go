@@ -17,12 +17,13 @@ import (
 )
 
 type TaskReport struct {
-	ID       string   `json:"id"`
-	Status   string   `json:"status"`
-	Attempts int      `json:"attempts"`
-	Artifact string   `json:"artifact,omitempty"`
-	Error    string   `json:"error,omitempty"`
-	Versions []string `json:"artifactVersions,omitempty"`
+	ID        string   `json:"id"`
+	Status    string   `json:"status"`
+	Attempts  int      `json:"attempts"`
+	Recovered bool     `json:"recovered,omitempty"`
+	Artifact  string   `json:"artifact,omitempty"`
+	Error     string   `json:"error,omitempty"`
+	Versions  []string `json:"artifactVersions,omitempty"`
 }
 
 type Check struct {
@@ -39,6 +40,7 @@ type Report struct {
 	Plan       int          `json:"planVersion"`
 	Tasks      []TaskReport `json:"tasks"`
 	Checks     []Check      `json:"checks,omitempty"`
+	Recoveries int          `json:"recoveries,omitempty"`
 	Acceptance string       `json:"acceptance,omitempty"`
 	Open       []string     `json:"open,omitempty"`
 	Generated  time.Time    `json:"generatedAt"`
@@ -51,9 +53,12 @@ func Build(st *store.Store, obj goal.Objective) (Report, error) {
 	}
 	report := Report{Objective: obj.Title, Goal: obj.Goal, Status: string(obj.Status),
 		Plan: obj.PlanVersion, Acceptance: obj.Acceptance, Generated: time.Now().UTC()}
+	if raw, err := st.GetMeta("recovery_count"); err == nil && raw != "" {
+		_, _ = fmt.Sscanf(raw, "%d", &report.Recoveries)
+	}
 	for _, t := range tasks {
 		row := TaskReport{ID: string(t.ID), Status: string(t.Status), Attempts: t.Attempts,
-			Artifact: t.ArtifactPath, Error: t.LastError}
+			Recovered: t.Attempts > 1, Artifact: t.ArtifactPath, Error: t.LastError}
 		evidence, err := st.EvidenceFor(t.ID)
 		if err != nil {
 			return Report{}, err
@@ -82,10 +87,14 @@ func Write(dir string, r Report) error {
 
 func markdown(r Report) string {
 	out := "# 交付报告\n\n"
-	out += fmt.Sprintf("- 目标：%s\n- 状态：%s\n- 计划版本：v%d\n- 生成时间：%s\n\n", r.Objective, r.Status, r.Plan, r.Generated.Format(time.RFC3339))
-	out += "## 任务\n\n| Task | 状态 | 尝试 | 产物 | 说明 |\n|---|---|---|---|---|\n"
+	out += fmt.Sprintf("- 目标：%s\n- 状态：%s\n- 计划版本：v%d\n- 恢复次数：%d\n- 生成时间：%s\n\n", r.Objective, r.Status, r.Plan, r.Recoveries, r.Generated.Format(time.RFC3339))
+	out += "## 任务\n\n| Task | 状态 | 尝试 | 恢复 | 产物 | 说明 |\n|---|---|---|---|---|---|\n"
 	for _, t := range r.Tasks {
-		out += fmt.Sprintf("| %s | %s | %d | %s | %s |\n", t.ID, t.Status, t.Attempts, t.Artifact, t.Error)
+		recovered := ""
+		if t.Recovered {
+			recovered = "是"
+		}
+		out += fmt.Sprintf("| %s | %s | %d | %s | %s | %s |\n", t.ID, t.Status, t.Attempts, recovered, t.Artifact, t.Error)
 	}
 	if len(r.Checks) > 0 {
 		out += "\n## 交付验收（在 out/ 的副本上运行）\n\n| Task | 命令 | 结果 |\n|---|---|---|\n"

@@ -5,6 +5,8 @@ bin/
 desktop/build/
 work/
 evidence/
+!internal/evidence/
+!internal/evidence/*.go
 design/outputs/
 *.db
 *.db-wal

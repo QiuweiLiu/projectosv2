@@ -35,7 +35,11 @@ func (m *Manager) DraftGoal(ctx context.Context, conversationID string) (convers
 	}
 	contextText := ""
 	if m.cfg.ProjectContext != nil && c.ProjectID != "" {
-		contextText = m.cfg.ProjectContext(c.ProjectID)
+		query := ""
+		if len(msgs) > 0 {
+			query = msgs[len(msgs)-1].Text
+		}
+		contextText = m.cfg.ProjectContext(c.ProjectID, query)
 	}
 	prompt := handoffPrompt(msgs, contextText)
 	srv, err := m.ensureServer(ctx)

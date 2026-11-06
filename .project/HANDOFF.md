@@ -1,5 +1,5 @@
 # Handoff
-Status: p4_min（机器检查/权限补拉/共享产物/Progress/Metrics）
+Status: p5（可信产物/Progress/有界恢复/Evidence Context/Cockpit）
 
 ## Goal
 在现有 Go Kernel 上增加桌面 AI 工作台：普通聊天与长期托管任务分离；
@@ -18,15 +18,16 @@ Status: p4_min（机器检查/权限补拉/共享产物/Progress/Metrics）
 - **P3.1**：多轮对话 Goal Draft（来源/context version）→ 编辑确认 → Objective → Plan；
   notes 目标真实 handoff→执行→验收→交付完成。
 - **P3.2**：Project Context Builder 注入聊天首条消息与 Planner `--context`；项目快照回写。
-- **P4**：机器检查进入 worker prompt；计划语义预检拒绝未声明实现符号；权限 pending 重启
-  补拉；provider 瞬态有界退避；跨 Objective `project-artifacts/` 共享；`goal progress`/
-  `/progress` 确定性下一动作；`/metrics` 任务/token/耗时；消息同步 cursor 分页 2000 条；
-  Handoff 元指令确定性过滤。
+- **P5**：Metrics NULL/墙钟/分角色 token；共享产物仅 completed+delivery+哈希一致才发布，
+  Manifest 记录来源/版本/哈希，staging+flock 原子刷新；结构化 Progress（needs_planning/
+  confirmation/approval/ready/running/blocked/recoverable/manual/completed/cancelled/unknown）；
+  Recovery 有界重试/重排队/审批/unknown 不重试；Evidence Context 查询相关且区分可信级别；
+  Cockpit 恢复面板与共享证据；`/api/events/stream` 游标恢复。
 - 聊天转托管：`/api/goals` + `/api/objectives/{id}/plan`，不自动执行。
 - 任务侧保留 P2：Workspace、多目标、审批、diff、`--session`、work prune、token 实测。
 
 ## Verified
-- 222 项 Go 测试 + `-race` + `vet` 全绿。
+- 266 项 Go 测试 + `-race` + `vet` 全绿。
 - 真实 OpenCode：3 轮聊天、SSE delta、工具写文件 + permission once 批准；
   serve 重启后历史与 Session 恢复；`/api/objectives` 始终为空。
 - 真实托管目标：planner → worker → reviewer → acceptance → **objective acceptance**
@@ -34,24 +35,22 @@ Status: p4_min（机器检查/权限补拉/共享产物/Progress/Metrics）
 - `runNow=true` 实测只到 `planned`，tasks 表 0 条。
 - `/chat` 浏览器发送/流式/项目过滤/工具卡片已验证；桌面 `--check` 通过。
 - 基线 HEAD：`e5cfec4`；P3.0–P3.2 提交 `7fa3b9a`；P4 提交 `dfa913c`；P4 修复提交 `345187c`，均已 push 到 `origin/main`。
-- P4 真实验证：计划语义预检（坏计划拒绝/好计划通过）、worker 机器检查、权限重启补拉、
-  跨 Objective 共享产物、真实 Handoff 过滤、`order=asc` cursor 分页。
+- P5 真实：A 自动恢复（T1 失败→重试→T2→交付）；B/C 同 Project 三个 Objective，B/C 真实
+  worker 读 Manifest 产物并分别写 `metric_b=42`、summary；C kill -9 后 unknown 拒绝重试，
+  人工 `recover --approve --task` 后完成；Metrics 实测 B 4457/127、C 4183/208 tokens。
 
 ## Open
-- Goal Draft 合同/来源已保存；解析层已过滤常见聊天元指令，模型新措辞仍需观察。
-- P3.3 智能干预、P3.5 故障注入/指标仍未完整。
-- Cockpit 的 Kernel 事件仍是轮询；聊天已 SSE，`/api/events/stream` 已提供但 UI 未切换。
-- 聊天消息历史无级联清理；事件每对话保留 500 条。
+- Recovery 诊断纯确定性，无模型辅助；unknown 需人工 `--task` 批准后恢复。
+- P3.5 未注入：磁盘满、只读挂载、运行中 SQLite 失效、OpenCode Server 退出重连。
 - 托管任务仍是执行前审批，不是逐工具拦截；command 不是沙箱。
-- 未注入：取消/完成进程级交错、磁盘满/只读挂载、运行中 SQLite 失效。
+- 聊天消息历史无级联清理；事件每对话保留 500 条。
 - Windows/Linux、桌面签名/公证、日志轮转未做。
 
 ## Active
-工作副本：`~/dev/projectosv2`（Git HEAD `345187c`，clean）。
-本轮测试服务已停止；旧演示 8787/8789/8790 不是本轮启动。
+工作副本：`~/dev/projectosv2`（P5 提交后 clean）。本轮测试服务已停止；
 旧演示 8787/8789/8790 不是本轮启动。
 
 ## Next
-1. 在 `/chat` 关联真实 Objective，跑“聊天 → 转托管 → 计划 → 执行 → 交付”全流程。
-2. P3.5：取消/完成交错、磁盘满/只读挂载、运行中 SQLite 失效注入。
-3. 把 Cockpit 时间线切到 `/api/events/stream`，再做日志/消息保留策略。
+1. 用真实模型复核 Recovery 的失败分类与 Evidence 选择质量，再决定是否加一次有界模型诊断。
+2. P3.5：磁盘满/只读挂载/运行中 SQLite 失效/OpenCode Server 退出重连。
+3. 桌面端慢消费者与长会话压力回放；日志/消息保留策略。

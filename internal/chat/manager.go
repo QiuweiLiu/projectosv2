@@ -28,7 +28,7 @@ type Config struct {
 	Bin            string
 	Root           string // workspace root
 	DefaultModel   string
-	ProjectContext func(projectID string) string
+	ProjectContext func(projectID, query string) string
 }
 
 type subscription struct {
@@ -683,11 +683,11 @@ func (m *Manager) ServerError() error {
 	return m.serverErr
 }
 
-func promptWithContext(text string, c conversation.Conversation, provider func(string) string) string {
+func promptWithContext(text string, c conversation.Conversation, provider func(string, string) string) string {
 	if c.ContextSent || c.ProjectID == "" || provider == nil {
 		return text
 	}
-	projectContext := strings.TrimSpace(provider(c.ProjectID))
+	projectContext := strings.TrimSpace(provider(c.ProjectID, text))
 	if projectContext == "" {
 		return text
 	}

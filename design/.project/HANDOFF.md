@@ -21,7 +21,7 @@ Status: p3_0_2（验收缓存 / 消息同步 / SSE / Handoff / Context）
   - macOS 原生外壳：Objective-C + WKWebView，`desktop/build.sh`。
 
 ## Verified
-- 222 项 Go 测试 + `-race` + `vet` 全绿；kernel 审计 0 fail / 1 warn（根目录布局）。
+- 266 项 Go 测试 + `-race` + `vet` 全绿；kernel 审计 0 fail / 1 warn（根目录布局）。
 - 同一 Workspace 创建两个目标、切换、分别读取详情/汇报/事件；浏览器内完成。
 - 真实目标 `hello world`：规划 → 执行 → reviewer → acceptance → 交付，token 为实测值。
 - 审批弹窗在含 high risk + `python3 -m pytest` 的计划上正确列出并阻止未勾选执行。

@@ -18,12 +18,13 @@ import (
 
 	"projectos/kernel/internal/domain"
 	"projectos/kernel/internal/goal"
+	"projectos/kernel/internal/recovery"
 	"projectos/kernel/internal/store"
 )
 
-// controlServer relays writes to `kernel goal ...` subprocesses. It never opens
-// the database for writing: the Kernel stays the only writer, which is what
-// makes the single-writer and recovery guarantees hold.
+// controlServer relays writes to `kernel goal ...` subprocesses. The only
+// in-process write is recovery approval, which takes the same state-dir lock as
+// a scheduler and uses Store transitions; there is still one write authority.
 type controlServer struct {
 	binary string
 	ws     *workspace
@@ -194,7 +195,7 @@ func (c *controlServer) planOnly(id string) {
 	}
 	c.set(id, "planning")
 	args := []string{"goal", "plan", "--dir", p.Dir, "--planner", "model"}
-	if ctx := c.ws.ProjectContextText(p.ProjectID); ctx != "" {
+	if ctx := c.ws.ProjectContextFor(p.ProjectID, p.Obj.Goal); ctx != "" {
 		args = append(args, "--context", ctx)
 	}
 	if _, err := c.runGoal(p.Dir, args...); err != nil {
@@ -262,7 +263,7 @@ func (c *controlServer) objectiveAction(w http.ResponseWriter, r *http.Request, 
 			defer c.release(id)
 			c.set(id, "planning")
 			args := []string{"goal", "plan", "--dir", p.Dir, "--planner", "model"}
-			if ctx := c.ws.ProjectContextText(p.ProjectID); ctx != "" {
+			if ctx := c.ws.ProjectContextFor(p.ProjectID, p.Obj.Goal); ctx != "" {
 				args = append(args, "--context", ctx)
 			}
 			if _, err := c.runGoal(p.Dir, args...); err != nil {
@@ -316,7 +317,7 @@ func (c *controlServer) objectiveAction(w http.ResponseWriter, r *http.Request, 
 			defer c.release(id)
 			c.set(id, "planning continuation")
 			args := []string{"goal", "continue", "--dir", p.Dir, "--goal", req.Goal}
-			if ctx := c.ws.ProjectContextText(p.ProjectID); ctx != "" {
+			if ctx := c.ws.ProjectContextFor(p.ProjectID, req.Goal); ctx != "" {
 				args = append(args, "--context", ctx)
 			}
 			if _, err := c.runGoal(p.Dir, args...); err != nil {
@@ -326,6 +327,65 @@ func (c *controlServer) objectiveAction(w http.ResponseWriter, r *http.Request, 
 			c.set(id, "continuation planned")
 		}()
 		writeJSON(w, map[string]string{"objective": id, "status": "planning continuation"})
+	case "recover":
+		var req struct {
+			Approve bool `json:"approve"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil && err != io.EOF {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		st, err := openGoalStore(p.Dir)
+		if err != nil {
+			http.Error(w, "store busy: "+err.Error(), http.StatusConflict)
+			return
+		}
+		defer st.Close()
+		obj, ok, err := singleObjective(st)
+		if err != nil || !ok {
+			http.Error(w, "unknown objective", http.StatusNotFound)
+			return
+		}
+		plan, hasPlan, err := st.GetPlan(obj.ID, obj.PlanVersion)
+		if err != nil || !hasPlan {
+			http.Error(w, "confirmed plan not found", http.StatusConflict)
+			return
+		}
+		decision, err := recovery.Decide(st, obj, len(approvalReasons(plan.Spec)) > 0,
+			recovery.Policy{MaxRecoveries: recovery.Budget(st), AttemptCap: 3, ReplansLeft: 1})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		pending, hasPending, _ := recovery.GetPending(st)
+		if req.Approve {
+			taskID, reason := decision.TaskID, decision.Reason
+			if hasPending {
+				taskID, reason = pending.TaskID, pending.Reason
+			}
+			if taskID == "" {
+				http.Error(w, "no recoverable failure", http.StatusConflict)
+				return
+			}
+			ok, err := st.RequeueBlocked(domain.TaskID(taskID), "recovery approved: "+reason, 3)
+			if err != nil || !ok {
+				http.Error(w, "task is not retryable", http.StatusConflict)
+				return
+			}
+			count, _ := recovery.Increment(st)
+			_ = recovery.ClearPending(st)
+			if obj.Status == goal.StatusFailed {
+				if err := st.MoveObjective(obj.ID, goal.StatusDraft); err == nil {
+					if err := st.MoveObjective(obj.ID, goal.StatusPlanned); err == nil {
+						_ = st.MoveObjective(obj.ID, goal.StatusActive)
+					}
+				}
+			}
+			_ = st.AppendEvent(domain.TaskID(taskID), "recovery_approved", reason)
+			writeJSON(w, map[string]any{"status": "requeued", "taskId": taskID, "count": count})
+			return
+		}
+		writeJSON(w, map[string]any{"decision": decision, "pending": pending, "hasPending": hasPending})
 	case "report":
 		if !c.claim(id) {
 			http.Error(w, "an action is already running for this objective", http.StatusConflict)
