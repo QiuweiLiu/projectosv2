@@ -25,7 +25,7 @@ Status: m1_m2_chat（持久化聊天 + 实时 SSE + 工具审批）
   → 交付 completed；objective review 记录实测 token。
 - `runNow=true` 实测只到 `planned`，tasks 表 0 条。
 - `/chat` 浏览器发送/流式/项目过滤/工具卡片已验证；桌面 `--check` 通过。
-- 基线 HEAD：`c89a06e`；本轮改动尚未 commit/push。
+- 基线 HEAD：`c89a06e`；本轮已提交 `a5393f9` 并 push 到 `origin/main`。
 
 ## Open
 - 托管任务的暂停调度（pause/resume）尚未实现；当前只有 cancel。
