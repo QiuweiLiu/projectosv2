@@ -6,7 +6,7 @@ OpenCode v2 Session + SSE 流 + 工具级 ask 审批；聊天可显式转成托�
 Kernel 仍是 Task/Run 唯一写者；单机、单用户、多目标 Workspace + Project 归属。
 
 ## Verified
-- **192 项测试 + `-race` + `vet` 全绿**；真实运行后无残留进程。本轮提交 `a5393f9`，已 push。
+- **192 项测试 + `-race` + `vet` 全绿**；真实运行后无残留进程。本轮提交 `0fe6495`，已 push。
 - **场景 A**：待办应用 3 任务，`node test.js` 验收，`out/` 组装后 11–14 项测试通过。
 - **场景 B**：sales.csv → summarize.js → summary.md，总额 60（一次通过，0 阻断）。
 - **场景 C**：真实模型重规划（T1 失败 → T1-fix → 完成）。
