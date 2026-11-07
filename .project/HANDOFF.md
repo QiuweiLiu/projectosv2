@@ -17,7 +17,8 @@ Evidence/Review 唯一权威，模型只提案，人在关键处确认。
 - **P6.3**：Task A 真实对照完成；发现并修复两个真实缺陷（worker 缺依赖文件、
   Objective judge 空目录），最终 ProjectOS hidden PASS。
 - **桌面**：新增“文件 → 选择工作区…”（Cmd+O），NSOpenPanel 可选择/创建目录；选择持久化到
-  用户偏好，切换时重启自己启动的本地服务，窗口标题显示当前工作区。
+  用户偏好，切换时重启自己启动的本地服务，窗口标题显示当前工作区。UI 采用 unslop 方向：
+  深色侧栏、暖纸内容区、单一铜色重点；Cockpit 同步换肤。
 - P5 仍有效：自动恢复、共享 Manifest、Evidence Context、Cockpit 恢复面板。
 
 ## Verified
@@ -29,7 +30,7 @@ Evidence/Review 唯一权威，模型只提案，人在关键处确认。
 - P6.3 Task A（n=1）：baseline 140.1 s / 6,583+385 tokens；ProjectOS 629.4 s /
   45,957+1,024 tokens；两者 hidden PASS；0 人工介入。ProjectOS 成本显著更高，
   详见 `reports/p6-benchmark-2026-11-07.md`。
-- 基线 HEAD：`c218d0e`；P6 提交 `ecf8707`；桌面工作区选择 `fda956e`，已 push 到 `origin/main`。
+- 基线 HEAD：`c218d0e`；P6 提交 `ecf8707`；桌面工作区选择 `fda956e`；UI 重构 `16808a4`，已 push 到 `origin/main`。
 
 ## Open
 - Benchmark 只跑 Task A 一个样本；B/C 未运行，不能断言整体收益。
@@ -38,7 +39,7 @@ Evidence/Review 唯一权威，模型只提案，人在关键处确认。
 - 命令验收不是沙箱；托管任务不是逐工具审批；聊天消息保留 1000、事件 500。
 
 ## Active
-工作副本：`~/dev/projectosv2`（Git HEAD `fda956e`，clean）。
+工作副本：`~/dev/projectosv2`（Git HEAD `16808a4`，clean）。
 测试服务已停止；旧演示 8787/8789/8790 不是本轮启动。
 
 ## Next
