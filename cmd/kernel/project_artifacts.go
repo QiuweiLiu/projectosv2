@@ -417,8 +417,14 @@ func seedProjectArtifacts(dir string) error {
 	defer unlock()
 	source := sharedArtifactDir(root, meta.ID)
 	dest := filepath.Join(dir, "repo", "project-artifacts")
-	// Verify everything before clearing the old seed. A tampered entry must not
-	// leave the worker with a half-updated namespace.
+	// Once a valid manifest is present, the old seed namespace is untrusted.
+	// Clear it before copying; every source file is hash-verified below.
+	if err := os.RemoveAll(dest); err != nil {
+		return fmt.Errorf("clear seed artifact copy: %w", err)
+	}
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return err
+	}
 	type seedFile struct {
 		rel string
 		raw []byte
@@ -452,12 +458,6 @@ func seedProjectArtifacts(dir string) error {
 			return fmt.Errorf("shared artifact %s/%s does not match its manifest hash", entry.ObjectiveID, rel)
 		}
 		files = append(files, seedFile{rel: filepath.Join(entry.ObjectiveID, rel), raw: raw})
-	}
-	if err := os.RemoveAll(dest); err != nil {
-		return fmt.Errorf("clear seed artifact copy: %w", err)
-	}
-	if err := os.MkdirAll(dest, 0o755); err != nil {
-		return err
 	}
 	for _, file := range files {
 		to := filepath.Join(dest, file.rel)
