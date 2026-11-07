@@ -109,25 +109,68 @@
   @media (max-width:1180px){.app{grid-template-columns:248px minmax(0,1fr)}.right{display:none}}
   @media (max-width:760px){.app{grid-template-columns:1fr}.side{display:none}}
 </style>
+<style id="modern-blue-workspace">
+  :root{
+    --bg:#F7F9FC;--panel:#FFFFFF;--panel-soft:#F8FAFD;--side:#FFFFFF;
+    --line:#E4EAF2;--line-strong:#CBD5E1;--text:#111827;--muted:#667085;--faint:#98A2B3;
+    --accent:#2563EB;--accent-strong:#1D4ED8;--accent-soft:#E8F0FF;
+    --ok:#16A34A;--warn:#D97706;--bad:#DC2626;--radius:12px;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC",system-ui,sans-serif;font-size:13px}
+  .app{grid-template-columns:260px minmax(0,1fr) 312px;background:var(--bg)}
+  .side{background:var(--side);border-right:1px solid var(--line);color:var(--text)}
+  .brand{padding:20px 18px 14px}.brand b{font-size:16px;color:var(--text)}.dot{background:var(--accent);width:8px;height:8px}
+  .side-actions{padding:0 14px 10px}.side .btn{background:#fff;border-color:var(--line);color:var(--text)}
+  .side .btn:hover{background:var(--panel-soft);border-color:#B9C7DA}.side .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}.side .btn.primary:hover{background:var(--accent-strong)}
+  .side-nav{display:grid;gap:2px;padding:0 12px 10px;border-bottom:1px solid var(--line)}
+  .side-nav a{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:8px;color:var(--muted);text-decoration:none;font-size:12.5px}
+  .side-nav a:hover,.side-nav a.active{background:var(--accent-soft);color:var(--accent-strong)}
+  .side-section{color:var(--faint);font-size:11px;padding:15px 7px 7px}.side-scroll{padding:0 12px 14px;scrollbar-color:#C7D2E2 transparent}
+  .conv{padding:9px 10px;border-radius:9px;color:var(--text);margin-bottom:3px}.conv:hover{background:var(--panel-soft)}.conv.on{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+  .conv .t{font-size:12.5px}.conv .p{color:var(--muted);font-size:11px}.side-foot{border-top:1px solid var(--line);padding:12px 14px}.side-foot input{background:#fff;border-color:var(--line);color:var(--text);border-radius:8px}.side-foot input::placeholder{color:var(--faint)}
+  .main{background:var(--bg)}.top{padding:16px 24px;background:#fff;border-bottom:1px solid var(--line)}.top h1{font-size:19px;color:var(--text)}.top .meta{font-size:12px;color:var(--muted)}
+  .app>aside,.app>main{min-height:0}.side-scroll,.messages,.right{min-height:0;overflow:auto}.side-foot,.composer,.top{flex:none}.top .meta #modelLabel{display:none}
+  .top select,.composer select{background:#fff;border-color:var(--line);border-radius:8px;color:var(--text)}
+  .btn{background:#fff;border-color:var(--line-strong);border-radius:8px;color:var(--text);transition:background .16s,border-color .16s,color .16s}.btn:hover{background:var(--panel-soft);border-color:#B9C7DA}.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}.btn.primary:hover{background:var(--accent-strong)}
+  .btn.danger{color:var(--bad);border-color:#F2C6C6}.badge{border-color:var(--line);color:var(--muted);border-radius:999px}.badge.running{color:var(--accent-strong);border-color:#BFD2FF;background:var(--accent-soft)}.badge.error{color:var(--bad);border-color:#F2C6C6;background:#FEF2F2}.badge.ok{color:var(--ok);border-color:#B7E4C2;background:#F0FDF4}
+  .messages{padding:30px 24px 20px;scrollbar-color:#C7D2E2 transparent}.empty{font-size:13px;color:var(--muted)}
+  .msg{max-width:820px;margin-bottom:20px}.msg .who{width:26px;height:26px;border-radius:8px;background:#EEF2F7;color:var(--muted)}.msg.user .who{background:var(--accent);color:#fff}.msg .bubble{border-color:var(--line);border-radius:12px;font-size:14px;line-height:1.75;box-shadow:0 1px 2px rgba(16,24,40,.03)}.msg.user .bubble{background:#F1F5FB;border-color:#DCE6F5}.msg .bubble.streaming::after{color:var(--accent)}
+  .tools{max-width:820px}.tool{border-left-color:#C7D2E2;color:var(--muted)}.tool .th{justify-content:flex-start;align-items:baseline}.tool .th .right{display:inline;flex:0 0 auto;min-width:0;margin:0;padding:0;border:0;background:transparent;overflow:visible;color:var(--muted)}.permission{max-width:820px;border:1px solid #F5D7A7;border-left:3px solid var(--warn);border-radius:10px;background:#FFFBEB;padding:11px 13px}.permission b{color:#A15C00}
+  .composer{flex:none;padding:14px 24px 18px;background:var(--bg);border-top:1px solid var(--line)}.composer .box{max-width:860px;border-color:var(--line-strong);border-radius:12px;box-shadow:0 2px 8px rgba(16,24,40,.04)}.composer .box:focus-within{border-color:#8DB1FF;box-shadow:0 0 0 3px var(--accent-soft)}.composer textarea{font-size:14px}.composer .below{max-width:860px;color:var(--muted)}
+  .right{background:#fff;border-left:1px solid var(--line);padding:18px 16px;scrollbar-color:#C7D2E2 transparent}.right h2{font-size:12px;color:var(--muted);letter-spacing:.02em}.right .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:12px;box-shadow:0 1px 2px rgba(16,24,40,.03)}.right .task{border-top-color:var(--line)}.right .hint{font-size:11.5px;color:var(--muted)}.link{color:var(--accent)}
+  .inspector-tabs{display:flex;gap:4px;margin:-2px 0 16px;padding:3px;background:var(--panel-soft);border:1px solid var(--line);border-radius:9px}.inspector-tabs button{flex:1;border:0;background:transparent;color:var(--muted);border-radius:7px;padding:6px 3px;font-size:11.5px}.inspector-tabs button.active{background:#fff;color:var(--accent-strong);box-shadow:0 1px 3px rgba(16,24,40,.08)}
+  .inspector-card[data-panel]{display:none}.inspector-card[data-panel].active{display:block}.inspector-card[data-panel="overview"]{display:block}.inspector-card[data-panel="overview"].inactive{display:none}
+  .more-wrap{position:relative}.more-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:10;min-width:150px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:5px;box-shadow:0 8px 24px rgba(16,24,40,.12)}.more-menu a{display:block;padding:7px 9px;color:var(--text);text-decoration:none;border-radius:7px;font-size:12px}.more-menu a:hover{background:var(--panel-soft)}
+  .top>div:first-child{min-width:0;flex:1 1 auto}.top-actions{display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:0;max-width:100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}.top-actions::-webkit-scrollbar{display:none}.top-actions select{flex:0 0 180px;min-width:0;max-width:180px;text-overflow:ellipsis;white-space:nowrap}.top-actions .btn{flex:0 0 auto;min-width:0;white-space:nowrap}
+  .status-note{font-size:11px;color:var(--muted);margin-top:5px}
+  @media (max-width:1180px){.app{grid-template-columns:248px minmax(0,1fr)}.right{display:none}.app.inspector-open{grid-template-columns:248px minmax(0,1fr) 312px}.app.inspector-open .right{display:block}}
+  @media (max-width:760px){.app,.app.inspector-open{grid-template-columns:1fr}.side{display:none}.app.inspector-open .right{display:none}.top{padding:13px 16px}.top-actions select{flex-basis:140px;max-width:140px}.messages,.composer{padding-left:16px;padding-right:16px}}
+</style>
 </head>
 <body>
-<div class="app">
+<div class="app" id="app">
   <aside class="side">
     <div class="brand"><b><span class="dot"></span>ProjectOS</b><span class="badge" id="mode">聊天</span></div>
-    <div class="side-actions">
-      <button class="btn primary" id="newChat" style="flex:1">＋ 新对话</button>
-      <a class="btn" href="/" title="任务驾驶舱">任务</a>
-    </div>
+     <div class="side-actions">
+       <button class="btn primary" id="newChat" style="flex:1">＋ 新对话</button>
+       <a class="btn" href="/" title="任务驾驶舱">任务</a>
+     </div>
+     <nav class="side-nav" aria-label="主导航">
+       <a class="active" href="/chat"><span>聊天</span></a>
+       <a href="/"><span>项目</span></a>
+       <a href="#token"><span>设置</span></a>
+     </nav>
     <div class="side-scroll">
       <div class="side-section">项目</div>
       <select id="projSel" style="width:calc(100% - 8px);margin:0 4px 8px;border:1px solid var(--line);border-radius:7px;padding:5px 7px;background:#fff"></select>
       <div class="side-section">对话</div>
-      <div id="convs"><div class="hint" style="padding:4px 6px">加载中…</div></div>
+      <div id="convs"><div class="hint" style="padding:4px 6px">输入控制令牌后加载对话</div></div>
     </div>
-    <div class="side-foot">
-      <input id="token" type="password" placeholder="控制令牌" autocomplete="off">
-      <div class="hint">普通聊天不会创建 Objective。只有“转为托管目标”才会进入计划流程。</div>
-    </div>
+     <div class="side-foot">
+       <input id="token" type="password" placeholder="控制令牌" autocomplete="off">
+       <div class="hint">连接状态与模型设置仅在本地工作区生效。普通聊天不会创建 Objective。</div>
+     </div>
   </aside>
 
   <main class="main">
@@ -140,11 +183,13 @@
           <span id="objLabel"></span>
         </div>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <select id="modelSel" title="聊天模型"><option value="">跟随默认</option></select>
-        <button class="btn small" id="stopBtn" disabled>停止</button>
-        <button class="btn small" id="toGoalBtn" disabled>转为托管目标</button>
-      </div>
+       <div class="top-actions">
+         <select id="modelSel" title="聊天模型"><option value="">跟随默认</option></select>
+         <button class="btn small" id="stopBtn" disabled>停止</button>
+         <button class="btn small" id="toGoalBtn" disabled>转为托管目标</button>
+         <button class="btn small" id="inspectorToggle" type="button">检查器</button>
+         <div class="more-wrap"><button class="btn small" id="moreBtn" type="button" aria-expanded="false">更多</button><div class="more-menu hidden" id="moreMenu"><a href="/" target="_self">打开任务驾驶舱</a><a href="#token">连接设置</a></div></div>
+       </div>
     </div>
 
     <div class="messages" id="messages">
@@ -166,23 +211,27 @@
     </div>
   </main>
 
-  <aside class="right">
-    <h2>项目 / 目标</h2>
-    <div class="card">
+   <aside class="right">
+     <h2>项目 / 目标</h2>
+     <div class="inspector-tabs" role="tablist" aria-label="检查器">
+       <button class="active" data-tab="overview" role="tab">概览</button><button data-tab="tasks" role="tab">任务</button><button data-tab="approvals" role="tab">审批</button><button data-tab="evidence" role="tab">证据</button>
+     </div>
+     <div class="card inspector-card" data-panel="overview">
       <select id="objSel" style="width:100%;border:1px solid var(--line);border-radius:7px;padding:6px">
         <option value="">不关联目标</option>
       </select>
-      <div class="hint" style="margin-top:7px">关联后，聊天会在该项目目录中进行；写文件/执行命令仍会逐次请求批准。</div>
+      <div class="hint" style="margin-top:7px">新建对话前选择目标；已打开会话的关联仅在新建对话时生效。写文件/执行命令仍会逐次请求批准。</div>
     </div>
-    <div class="card" id="projectCard"><div class="hint">项目上下文加载中…</div></div>
-    <div class="card" id="objCard">
+     <div class="card inspector-card" data-panel="overview" id="projectCard"><div class="hint">项目上下文加载中…</div></div>
+     <div class="card inspector-card" data-panel="overview" id="objCard">
       <div class="hint">未关联 Objective。</div>
     </div>
-    <h2>任务</h2>
-    <div class="card" id="tasks"><div class="hint">关联目标后显示任务。</div></div>
-    <h2>说明</h2>
-    <div class="card">
-      <div class="hint">
+     <h2 data-section="tasks">任务</h2>
+     <div class="card inspector-card" data-panel="tasks" id="tasks"><div class="hint">关联目标后显示任务。</div></div>
+     <div class="card inspector-card" data-panel="approvals" id="approvalInspector"><div class="hint">当前没有待处理审批。</div></div>
+     <h2 data-section="evidence">证据</h2>
+     <div class="card inspector-card" data-panel="evidence">
+       <div class="hint">
         聊天使用 OpenCode v2 Server 的真实 Session；回复通过 SSE 流式更新。<br><br>
         工具调用默认 <b>ask</b>：编辑文件、执行命令会在这里弹出批准卡片。<br><br>
         关闭窗口不会停止已托管的任务；聊天本身也不会写入 Task 状态。
@@ -216,6 +265,20 @@ function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function clip(s,n){ s=String(s||''); return s.length>n ? s.slice(0,n)+'…' : s; }
 function fmt(t){ if(!t) return ''; const d=new Date(t); return d.toLocaleString('zh-CN',{hour12:false}); }
+
+function setInspectorTab(name){
+  document.querySelectorAll('.inspector-tabs [data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.inspector-card[data-panel]').forEach(card => {
+    card.classList.toggle('active', card.dataset.panel === name);
+    card.classList.toggle('inactive', card.dataset.panel !== name);
+  });
+  document.querySelectorAll('[data-section]').forEach(h => h.classList.toggle('hidden', h.dataset.section !== name && h.dataset.section !== 'tasks'));
+}
+document.querySelectorAll('.inspector-tabs [data-tab]').forEach(b => b.onclick = () => setInspectorTab(b.dataset.tab));
+setInspectorTab('overview');
+$('inspectorToggle').onclick = () => $('app').classList.toggle('inspector-open');
+$('moreBtn').onclick = () => { const menu = $('moreMenu'); menu.classList.toggle('hidden'); $('moreBtn').setAttribute('aria-expanded', String(!menu.classList.contains('hidden'))); };
+document.addEventListener('click', e => { if(!e.target.closest('.more-wrap')) $('moreMenu').classList.add('hidden'); });
 
 async function api(path, opts){
   opts = opts || {};
@@ -318,6 +381,7 @@ async function loadConvs(){
 }
 
 async function newChat(){
+  $('objSel').disabled = false;
   const objectiveId = $('objSel').value;
   const projectId = $('projSel') ? $('projSel').value : '';
   const model = $('modelSel').value || '';
@@ -334,10 +398,11 @@ $('newChat').onclick = newChat;
 async function selectConv(id){
   if(state.stream){ state.stream.abort(); state.stream = null; }
   state.conv = null; state.detail = null; state.lastSeq = 0; state.streaming = null; state.rendered.clear(); state.lastUser = ''; state.resyncCount = 0;
-  $('messages').innerHTML = '<div class="empty">加载中…</div>';
+  $('messages').innerHTML = '<div class="empty">正在同步工作区…</div>';
   try {
     const d = await api('/api/conversations/'+encodeURIComponent(id));
     state.conv = d.conversation; state.detail = d;
+    $('objSel').disabled = true;
     $('title').textContent = d.conversation.title || '新对话';
     $('status').textContent = statusLabel(d.conversation.status);
     $('status').className = 'badge ' + (d.conversation.status === 'running' ? 'running' : d.conversation.status === 'error' ? 'error' : d.conversation.status === 'idle' ? 'ok' : '');
@@ -361,7 +426,7 @@ async function selectConv(id){
 function renderMessages(msgs){
   state.rendered.clear();
   const box = $('messages'); box.innerHTML = '';
-  if(!msgs.length){ box.innerHTML = '<div class="empty" id="empty">直接提问，或选择左侧历史对话。<br>需要执行任务时，点右上角“转为托管目标”。</div>'; return; }
+  if(!msgs.length){ box.innerHTML = '<div class="empty" id="empty"><b style="display:block;font-size:18px;color:var(--text);margin-bottom:8px">开始一个清晰的工作会话</b>直接提问，或描述一个想交给 ProjectOS 管理的目标。<br><span class="status-note">普通聊天不会创建任务；需要执行时，再转为托管目标并确认计划。</span></div>'; return; }
   msgs.forEach(m => addMessage(m.role, m.text, m.id));
   scrollBottom();
 }
@@ -610,16 +675,20 @@ function renderPermission(d){
       await api('/api/conversations/'+encodeURIComponent(state.conv.id)+'/permissions/'+encodeURIComponent(d.requestId), {
         method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({decision:b.dataset.p})
       });
-      el.remove();
-    } catch(e) { alert('批准失败：'+e.message); }
-  });
-  box.appendChild(el); scrollBottom();
+       el.remove();
+       $('approvalInspector').innerHTML = '<div class="hint">审批已处理：'+esc(d.action || '工具调用')+'。</div>';
+     } catch(e) { alert('批准失败：'+e.message); }
+   });
+   box.appendChild(el); scrollBottom();
+   $('approvalInspector').innerHTML = '<b style="font-size:12px">待处理审批</b><div class="hint" style="margin-top:6px">'+esc(d.action || '工具调用')+' · 请求 '+esc(d.requestId || '—')+'</div><div class="hint" style="margin-top:6px">审批卡片已固定在中央会话流中，请选择允许一次、始终允许或拒绝。</div>';
+   setInspectorTab('approvals');
 }
 
 async function boot(){
   bootToken();
   if(!state.token){
-    $('messages').innerHTML = '<div class="empty">先在左下角填入控制令牌。令牌在 Workspace 的 control-token 文件里。</div>';
+    $('convs').innerHTML = '<div class="hint" style="padding:6px">输入控制令牌后加载对话</div>';
+    $('messages').innerHTML = '<div class="empty"><b style="display:block;font-size:18px;color:var(--text);margin-bottom:8px">连接到本地工作区</b>请在左侧设置中输入控制令牌，令牌只在本地保存。</div>';
     $('send').disabled = true;
     return;
   }

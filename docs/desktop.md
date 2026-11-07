@@ -63,6 +63,5 @@ desktop/build/ProjectOS.app/Contents/MacOS/ProjectOS --check
 
 ## 视觉方向
 
-界面采用 "ink rail + warm paper + oxidized copper" 的安静工作台方向：深色侧栏承载导航，
-暖纸色主区承载内容，单一铜色用于主要动作、选中态和实时状态。视觉方向参考并改编自
-[unslop](https://github.com/heydamir/unslop) by Damir Sokolovsky（CC BY 4.0）。
+界面采用蓝白 Token 的安静工作台方向：左侧导航与对话列表、中间聊天区、右侧项目检查器组成三栏布局；
+蓝色用于主要动作与选中态，白色面板和浅灰背景承载内容。聊天工作台与 Cockpit 共用这套蓝白视觉语言。
