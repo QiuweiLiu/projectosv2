@@ -16,6 +16,8 @@ Evidence/Review 唯一权威，模型只提案，人在关键处确认。
 - **P6.2**：1200 条消息分页无丢失/重复；事件 500/对话；慢消费者 resync 测试。
 - **P6.3**：Task A 真实对照完成；发现并修复两个真实缺陷（worker 缺依赖文件、
   Objective judge 空目录），最终 ProjectOS hidden PASS。
+- **桌面**：新增“文件 → 选择工作区…”（Cmd+O），NSOpenPanel 可选择/创建目录；选择持久化到
+  用户偏好，切换时重启自己启动的本地服务，窗口标题显示当前工作区。
 - P5 仍有效：自动恢复、共享 Manifest、Evidence Context、Cockpit 恢复面板。
 
 ## Verified

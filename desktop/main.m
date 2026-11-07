@@ -8,6 +8,7 @@
 // an in-flight objective.
 
 static NSString *const kAppName = @"ProjectOS";
+static NSString *const kWorkspaceDefaultsKey = @"ProjectOSWorkspacePath";
 static const int kDefaultPort = 8799;
 static BOOL gStartedServer = NO;
 
@@ -18,8 +19,12 @@ static NSString *Env(NSString *key) {
 }
 
 static NSString *StateDirectory(void) {
+    // An explicit environment variable is useful for automation and --check.
     NSString *override = Env(@"PROJECTOS_DIR");
-    if (override) return override;
+    if (override) return [override stringByExpandingTildeInPath];
+    NSString *saved = [[NSUserDefaults standardUserDefaults] stringForKey:kWorkspaceDefaultsKey];
+    saved = [saved stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (saved.length) return [saved stringByExpandingTildeInPath];
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES);
     NSString *base = paths.firstObject ?: [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support"];
     return [[base stringByAppendingPathComponent:kAppName] stringByAppendingPathComponent:@"state"];
@@ -94,9 +99,13 @@ static NSString *EnsureServer(void) {
     return [@"http://" stringByAppendingString:actual ?: addr];
 }
 
-static void StopServer(void) {
+static void StopServerFor(NSString *dir) {
     NSString *output = nil;
-    RunKernel(@[@"serve", @"--dir", StateDirectory(), @"--stop"], &output);
+    RunKernel(@[@"serve", @"--dir", dir, @"--stop"], &output);
+}
+
+static void StopServer(void) {
+    StopServerFor(StateDirectory());
 }
 
 @interface AppDelegate : NSObject <NSApplicationDelegate>
@@ -106,7 +115,99 @@ static void StopServer(void) {
 
 @implementation AppDelegate
 
+- (void)installMenu {
+    NSMenu *mainMenu = [[NSMenu alloc] init];
+
+    NSMenuItem *appItem = [[NSMenuItem alloc] init];
+    [mainMenu addItem:appItem];
+    NSMenu *appMenu = [[NSMenu alloc] init];
+    [appItem setSubmenu:appMenu];
+    NSMenuItem *quit = [[NSMenuItem alloc] initWithTitle:@"退出 ProjectOS"
+                                                  action:@selector(terminate:)
+                                           keyEquivalent:@"q"];
+    quit.target = NSApp;
+    [appMenu addItem:quit];
+
+    NSMenuItem *fileItem = [[NSMenuItem alloc] init];
+    [mainMenu addItem:fileItem];
+    NSMenu *fileMenu = [[NSMenu alloc] initWithTitle:@"文件"];
+    [fileItem setSubmenu:fileMenu];
+    NSMenuItem *choose = [[NSMenuItem alloc] initWithTitle:@"选择工作区…"
+                                                    action:@selector(chooseWorkspace:)
+                                             keyEquivalent:@"o"];
+    choose.target = self;
+    [fileMenu addItem:choose];
+
+    NSMenuItem *editItem = [[NSMenuItem alloc] init];
+    [mainMenu addItem:editItem];
+    NSMenu *editMenu = [[NSMenu alloc] initWithTitle:@"编辑"];
+    [editItem setSubmenu:editMenu];
+    NSArray *edits = @[
+        @[@"撤销", @"undo:", @"z"],
+        @[@"重做", @"redo:", @"Z"],
+        @[@"剪切", @"cut:", @"x"],
+        @[@"复制", @"copy:", @"c"],
+        @[@"粘贴", @"paste:", @"v"],
+        @[@"全选", @"selectAll:", @"a"],
+    ];
+    for (NSArray *entry in edits) {
+        NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:entry[0]
+                                                      action:NSSelectorFromString(entry[1])
+                                               keyEquivalent:entry[2]];
+        [editMenu addItem:item];
+    }
+
+    [NSApp setMainMenu:mainMenu];
+}
+
+- (void)loadCockpit:(NSString *)base {
+    NSString *token = ControlToken();
+    NSString *url = token ? [NSString stringWithFormat:@"%@/chat#token=%@", base, token]
+                          : [base stringByAppendingString:@"/chat"];
+    [self.webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:url]]];
+    self.window.title = [NSString stringWithFormat:@"ProjectOS — %@", StateDirectory()];
+    self.window.representedURL = [NSURL fileURLWithPath:StateDirectory()];
+}
+
+- (void)chooseWorkspace:(id)sender {
+    NSOpenPanel *panel = [NSOpenPanel openPanel];
+    panel.canChooseDirectories = YES;
+    panel.canChooseFiles = NO;
+    panel.allowsMultipleSelection = NO;
+    panel.canCreateDirectories = YES;
+    panel.prompt = @"使用此工作区";
+    panel.message = @"选择 ProjectOS 的工作区目录。切换后会重启本地服务，已托管任务不会被取消。";
+    panel.directoryURL = [NSURL fileURLWithPath:StateDirectory()];
+    if ([panel runModal] != NSModalResponseOK) return;
+
+    NSString *old = StateDirectory();
+    NSString *next = panel.URL.path;
+    if ([next isEqualToString:old]) return;
+
+    if (gStartedServer) {
+        StopServerFor(old);
+        gStartedServer = NO;
+    }
+    [[NSUserDefaults standardUserDefaults] setObject:next forKey:kWorkspaceDefaultsKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+
+    NSString *base = EnsureServer();
+    if (!base) {
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"无法切换工作区";
+        alert.informativeText = [NSString stringWithFormat:@"无法在 %@ 启动 ProjectOS。已恢复上一个工作区。", next];
+        [alert runModal];
+        [[NSUserDefaults standardUserDefaults] setObject:old forKey:kWorkspaceDefaultsKey];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        NSString *restored = EnsureServer();
+        if (restored) [self loadCockpit:restored];
+        return;
+    }
+    [self loadCockpit:base];
+}
+
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
+    [self installMenu];
     NSString *base = EnsureServer();
     if (!base) {
         NSAlert *alert = [[NSAlert alloc] init];
@@ -126,16 +227,15 @@ static void StopServer(void) {
                                                          NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable)
                                                 backing:NSBackingStoreBuffered
                                                   defer:NO];
-    self.window.title = kAppName;
+    self.window.title = [NSString stringWithFormat:@"ProjectOS — %@", StateDirectory()];
+    self.window.representedURL = [NSURL fileURLWithPath:StateDirectory()];
     [self.window center];
     self.window.contentView = self.webView;
     [self.window makeKeyAndOrderFront:nil];
     // Put the control token in the fragment so the cockpit is usable without
     // asking the user to open control-token in a terminal. Fragments never reach
     // the server and the page removes it from the address bar after storing it.
-    NSString *token = ControlToken();
-    NSString *url = token ? [NSString stringWithFormat:@"%@/chat#token=%@", base, token] : [base stringByAppendingString:@"/chat"];
-    [self.webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:url]]];
+    [self loadCockpit:base];
     [NSApp activateIgnoringOtherApps:YES];
 }
 
