@@ -29,7 +29,7 @@ Evidence/Review 唯一权威，模型只提案，人在关键处确认。
 - P6.3 Task A（n=1）：baseline 140.1 s / 6,583+385 tokens；ProjectOS 629.4 s /
   45,957+1,024 tokens；两者 hidden PASS；0 人工介入。ProjectOS 成本显著更高，
   详见 `reports/p6-benchmark-2026-11-07.md`。
-- 基线 HEAD：`c218d0e`；P6 提交 `ecf8707`，已 push 到 `origin/main`。
+- 基线 HEAD：`c218d0e`；P6 提交 `ecf8707`；桌面工作区选择 `fda956e`，已 push 到 `origin/main`。
 
 ## Open
 - Benchmark 只跑 Task A 一个样本；B/C 未运行，不能断言整体收益。
@@ -38,7 +38,7 @@ Evidence/Review 唯一权威，模型只提案，人在关键处确认。
 - 命令验收不是沙箱；托管任务不是逐工具审批；聊天消息保留 1000、事件 500。
 
 ## Active
-工作副本：`~/dev/projectosv2`（Git HEAD `ecf8707`，clean）。
+工作副本：`~/dev/projectosv2`（Git HEAD `fda956e`，clean）。
 测试服务已停止；旧演示 8787/8789/8790 不是本轮启动。
 
 ## Next
