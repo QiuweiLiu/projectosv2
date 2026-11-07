@@ -5,6 +5,8 @@ package chat
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -263,7 +265,11 @@ func (m *Manager) Send(ctx context.Context, id, text string) (conversation.Messa
 	}
 	_, _ = m.persist(id, "user", map[string]string{"text": text, "messageId": msg.ID})
 	_ = m.store.SetStatus(id, conversation.StatusRunning, "")
-	promptText := promptWithContext(text, c, m.cfg.ProjectContext)
+	projectContext, contextVersion := m.projectContext(c, text)
+	promptText := text
+	if shouldInjectContext(c, projectContext, contextVersion) {
+		promptText = promptWithContext(text, projectContext)
+	}
 	remoteID, perr := srv.Prompt(ctx, sessionID, promptText, msg.ID)
 	if perr != nil && strings.Contains(perr.Error(), "404") {
 		// The server may have been restarted and no longer knows the session.
@@ -273,7 +279,7 @@ func (m *Manager) Send(ctx context.Context, id, text string) (conversation.Messa
 			ID: id, Title: c.Title, Model: c.Model, Dir: c.Dir,
 		})
 		if err == nil {
-			remoteID, perr = srv.Prompt(ctx, sessionID, text, msg.ID)
+			remoteID, perr = srv.Prompt(ctx, sessionID, promptText, msg.ID)
 		}
 	}
 	if perr != nil {
@@ -283,7 +289,7 @@ func (m *Manager) Send(ctx context.Context, id, text string) (conversation.Messa
 		_ = m.store.SetRemoteID(msg.ID, remoteID)
 	}
 	if promptText != text {
-		_ = m.store.MarkContextSent(id)
+		_ = m.store.MarkContextSent(id, contextVersion)
 	}
 	return msg, nil
 }
@@ -683,11 +689,29 @@ func (m *Manager) ServerError() error {
 	return m.serverErr
 }
 
-func promptWithContext(text string, c conversation.Conversation, provider func(string, string) string) string {
-	if c.ContextSent || c.ProjectID == "" || provider == nil {
-		return text
+func (m *Manager) projectContext(c conversation.Conversation, text string) (string, string) {
+	if c.ProjectID == "" || m.cfg.ProjectContext == nil {
+		return "", ""
 	}
-	projectContext := strings.TrimSpace(provider(c.ProjectID, text))
+	// The version must be query-independent. Otherwise query-specific selection
+	// would look like new evidence on every message and re-inject the context.
+	base := strings.TrimSpace(m.cfg.ProjectContext(c.ProjectID, ""))
+	if base == "" {
+		return "", ""
+	}
+	projectContext := strings.TrimSpace(m.cfg.ProjectContext(c.ProjectID, text))
+	if projectContext == "" {
+		projectContext = base
+	}
+	sum := sha256.Sum256([]byte(base))
+	return projectContext, hex.EncodeToString(sum[:])
+}
+
+func shouldInjectContext(c conversation.Conversation, projectContext, version string) bool {
+	return projectContext != "" && (!c.ContextSent || c.ContextVersion != version)
+}
+
+func promptWithContext(text, projectContext string) string {
 	if projectContext == "" {
 		return text
 	}

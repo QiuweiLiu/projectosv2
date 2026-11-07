@@ -7,7 +7,7 @@ Cockpit 恢复/证据展示；SSE 游标恢复。P3.5 磁盘满等极端故障�
 Kernel 仍是唯一 Task/Run 权威；Recovery 只调用 Store 转换与现有 replanner。
 
 ## Verified
-- **272 项测试 + `-race` + `vet` 全绿**；真实运行后无残留进程。
+- **281 项测试 + `-race` + `vet` 全绿**；真实运行后无残留进程。
 - **场景 A**：待办应用 3 任务，`node test.js` 验收，`out/` 组装后 11–14 项测试通过。
 - **场景 B**：sales.csv → summarize.js → summary.md，总额 60（一次通过，0 阻断）。
 - **场景 C**：真实模型重规划（T1 失败 → T1-fix → 完成）。

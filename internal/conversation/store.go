@@ -27,18 +27,19 @@ const (
 )
 
 type Conversation struct {
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	ProjectID   string    `json:"projectId,omitempty"`
-	ObjectiveID string    `json:"objectiveId,omitempty"`
-	Dir         string    `json:"dir,omitempty"`
-	SessionID   string    `json:"sessionId,omitempty"`
-	Model       string    `json:"model,omitempty"`
-	Status      Status    `json:"status"`
-	ContextSent bool      `json:"contextSent"`
-	LastError   string    `json:"lastError,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID             string    `json:"id"`
+	Title          string    `json:"title"`
+	ProjectID      string    `json:"projectId,omitempty"`
+	ObjectiveID    string    `json:"objectiveId,omitempty"`
+	Dir            string    `json:"dir,omitempty"`
+	SessionID      string    `json:"sessionId,omitempty"`
+	Model          string    `json:"model,omitempty"`
+	Status         Status    `json:"status"`
+	ContextSent    bool      `json:"contextSent"`
+	ContextVersion string    `json:"contextVersion,omitempty"`
+	LastError      string    `json:"lastError,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 type Message struct {
@@ -168,7 +169,7 @@ func migrateConversations(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	have := false
+	haveSent, haveVersion := false, false
 	for rows.Next() {
 		var cid int
 		var name, ctype string
@@ -178,14 +179,26 @@ func migrateConversations(db *sql.DB) error {
 			rows.Close()
 			return err
 		}
-		if name == "context_sent" {
-			have = true
+		switch name {
+		case "context_sent":
+			haveSent = true
+		case "context_version":
+			haveVersion = true
 		}
 	}
 	rows.Close()
-	if !have {
-		_, err := db.Exec(`ALTER TABLE conversations ADD COLUMN context_sent INTEGER NOT NULL DEFAULT 0`)
+	if err := rows.Err(); err != nil {
 		return err
+	}
+	if !haveSent {
+		if _, err := db.Exec(`ALTER TABLE conversations ADD COLUMN context_sent INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
+	if !haveVersion {
+		if _, err := db.Exec(`ALTER TABLE conversations ADD COLUMN context_version TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -263,10 +276,10 @@ func (s *Store) getLocked(id string) (Conversation, error) {
 	var c Conversation
 	var created, updated string
 	var contextSent int
-	err := s.db.QueryRow(`SELECT id,title,project_id,objective_id,dir,session_id,model,status,context_sent,last_error,created_at,updated_at
+	err := s.db.QueryRow(`SELECT id,title,project_id,objective_id,dir,session_id,model,status,context_sent,context_version,last_error,created_at,updated_at
 		FROM conversations WHERE id=?`, id).Scan(
 		&c.ID, &c.Title, &c.ProjectID, &c.ObjectiveID, &c.Dir, &c.SessionID, &c.Model,
-		&c.Status, &contextSent, &c.LastError, &created, &updated)
+		&c.Status, &contextSent, &c.ContextVersion, &c.LastError, &created, &updated)
 	c.ContextSent = contextSent == 1
 	if err != nil {
 		return Conversation{}, err
@@ -288,7 +301,7 @@ func (s *Store) List(limit int) ([]Summary, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rows, err := s.db.Query(`SELECT c.id,c.title,c.project_id,c.objective_id,c.dir,c.session_id,c.model,
-		c.status,c.context_sent,c.last_error,c.created_at,c.updated_at,
+		c.status,c.context_sent,c.context_version,c.last_error,c.created_at,c.updated_at,
 		COALESCE((SELECT m.text FROM messages m WHERE m.conversation_id=c.id ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1),'')
 		FROM conversations c ORDER BY c.updated_at DESC LIMIT ?`, limit)
 	if err != nil {
@@ -301,7 +314,7 @@ func (s *Store) List(limit int) ([]Summary, error) {
 		var created, updated string
 		var contextSent int
 		if err := rows.Scan(&c.ID, &c.Title, &c.ProjectID, &c.ObjectiveID, &c.Dir, &c.SessionID, &c.Model,
-			&c.Status, &contextSent, &c.LastError, &created, &updated, &c.LastMessage); err != nil {
+			&c.Status, &contextSent, &c.ContextVersion, &c.LastError, &created, &updated, &c.LastMessage); err != nil {
 			return nil, err
 		}
 		c.CreatedAt, c.UpdatedAt = parseTime(created), parseTime(updated)
@@ -311,10 +324,11 @@ func (s *Store) List(limit int) ([]Summary, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) MarkContextSent(id string) error {
+func (s *Store) MarkContextSent(id, version string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.db.Exec(`UPDATE conversations SET context_sent=1, updated_at=? WHERE id=?`, now(), id)
+	_, err := s.db.Exec(`UPDATE conversations SET context_sent=1, context_version=?, updated_at=? WHERE id=?`,
+		version, now(), id)
 	return err
 }
 

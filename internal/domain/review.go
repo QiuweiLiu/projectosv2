@@ -33,6 +33,7 @@ type Review struct {
 	TaskID          TaskID
 	ArtifactVersion string
 	Kind            ReviewKind
+	PlanVersion     int
 	Findings        []Finding
 	PromptChars     int
 	OutputChars     int

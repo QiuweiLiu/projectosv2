@@ -130,7 +130,8 @@ Metrics 区分累计 Run 耗时和 Objective 墙钟耗时；`finishedAt` 表示 
 active/paused/planned 等未结束目标为空；最后一次 Run 的结束时间单独放在
 `lastRunFinishedAt`，并返回 `activeRuns`。Token 按 planner/worker/reviewer/acceptance/objective 分列，真实值与
 `usageEstimated` 分开；空 Objective、未执行计划、失败/取消 Run 均返回稳定结构。
-`firstPass`/`acceptedAfterRetry`、`recoveryCount`、`autoRecoveries`/`manualRecoveries` 用于评估恢复效果；
+`firstPass`/`acceptedAfterRetry`、`recoveryCount`、`autoRecoveries`/`manualRecoveries`、
+`recoveryModelCalls` 用于评估恢复效果；
 planner/worker/reviewer/acceptance/objective token 分列，避免重复计算。
 
 provider 的 429/overloaded/ECONNRESET/连接中断最多重试 3 次（2s、4s 退避）；permanent

@@ -195,16 +195,13 @@ func TestSlowConsumerGetsResyncSignal(t *testing.T) {
 	_ = ch
 }
 
-func TestPromptContextInjectedOnce(t *testing.T) {
-	c := conversation.Conversation{ProjectID: "proj-1"}
-	provider := func(string, string) string { return "Verified: hello.txt" }
-	first := promptWithContext("do it", c, provider)
+func TestPromptWithContextAddsBoundedEvidence(t *testing.T) {
+	first := promptWithContext("do it", "Verified: hello.txt")
 	if !strings.Contains(first, "hello.txt") || !strings.Contains(first, "User request") {
 		t.Fatalf("first = %q", first)
 	}
-	c.ContextSent = true
-	if got := promptWithContext("next", c, provider); got != "next" {
-		t.Fatalf("second = %q", got)
+	if got := promptWithContext("next", ""); got != "next" {
+		t.Fatalf("empty context = %q", got)
 	}
 }
 
@@ -225,5 +222,36 @@ func TestCleanGoalRemovesEnglishChatMetaClause(t *testing.T) {
 	}
 	if got := cleanGoal("只回复收到"); got != "" {
 		t.Fatalf("meta-only goal = %q", got)
+	}
+}
+
+func TestContextRefreshOnlyWhenVersionChanges(t *testing.T) {
+	c := conversation.Conversation{ProjectID: "p", ContextSent: true, ContextVersion: "v1"}
+	if shouldInjectContext(c, "ctx", "v1") {
+		t.Fatal("unchanged context must not be re-injected")
+	}
+	if !shouldInjectContext(c, "ctx", "v2") {
+		t.Fatal("new evidence version must be injected")
+	}
+	if shouldInjectContext(conversation.Conversation{}, "", "") {
+		t.Fatal("empty context must not be injected")
+	}
+}
+
+func TestContextVersionIsQueryIndependent(t *testing.T) {
+	m := &Manager{cfg: Config{ProjectContext: func(projectID, query string) string {
+		if query == "" {
+			return "stable project facts"
+		}
+		return "facts relevant to " + query
+	}}}
+	c := conversation.Conversation{ProjectID: "p"}
+	text1, version1 := m.projectContext(c, "first question")
+	text2, version2 := m.projectContext(c, "second question")
+	if text1 == text2 {
+		t.Fatal("query-specific context was not selected")
+	}
+	if version1 == "" || version1 != version2 {
+		t.Fatalf("versions = %q %q", version1, version2)
 	}
 }

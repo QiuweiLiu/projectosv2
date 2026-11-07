@@ -44,6 +44,7 @@ type Metrics struct {
 	RecoveryCount          int `json:"recoveryCount"`
 	AutoRecoveries         int `json:"autoRecoveries"`
 	ManualRecoveries       int `json:"manualRecoveries"`
+	RecoveryModelCalls     int `json:"recoveryModelCalls"`
 
 	RunDurationMS     int64  `json:"runDurationMillis"`
 	WallClockMS       int64  `json:"wallClockMillis"`
@@ -158,6 +159,9 @@ func (s *Store) Metrics() (Metrics, error) {
 	}
 	if raw, err := s.GetMeta("recovery_count"); err == nil {
 		_, _ = fmt.Sscanf(raw, "%d", &m.RecoveryCount)
+	}
+	if raw, err := s.GetMeta("recovery_model_calls"); err == nil {
+		_, _ = fmt.Sscanf(raw, "%d", &m.RecoveryModelCalls)
 	}
 	if ok, err := s.hasTable("events"); err != nil {
 		return m, err

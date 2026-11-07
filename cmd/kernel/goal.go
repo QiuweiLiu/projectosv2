@@ -456,6 +456,7 @@ func goalRun(args []string) int {
 	fakeTicks := fs.Int("fake-ticks", 1, "observations before a fake run completes")
 	recoverOn := fs.Bool("recover", true, "bounded automatic recovery after a blocked task")
 	maxRecoveries := fs.Int("max-recoveries", 2, "maximum automatic recovery actions per objective")
+	recoveryModel := fs.String("recovery-model", "", "optional provider/model for one bounded unknown-failure diagnosis")
 	replanOn := fs.Bool("replan", false, "allow one bounded replan after a failure")
 	maxReplans := fs.Int("max-replans", 1, "maximum replans per run")
 	replanPlan := fs.String("replan-plan-file", "", "replacement plan JSON for the fake replanner")
@@ -732,11 +733,37 @@ func goalRun(args []string) int {
 			return code
 		}
 		if *recoverOn {
-			decision, derr := recovery.Decide(st, obj, needsApproval,
-				recovery.Policy{MaxRecoveries: *maxRecoveries, AttemptCap: 3, ReplansLeft: *maxReplans - replans})
+			policy := recovery.Policy{MaxRecoveries: *maxRecoveries, AttemptCap: 3, ReplansLeft: *maxReplans - replans}
+			decision, derr := recovery.DecideWithSuggestion(st, obj, needsApproval, policy, nil)
 			if derr != nil {
 				fmt.Fprintln(os.Stderr, "recovery:", derr)
 				return exitError
+			}
+			if *recoveryModel != "" && decision.Action == "stop" && decision.Category == "unknown" {
+				if calls, _ := recovery.ModelCalls(st); calls < 1 {
+					if _, cerr := recovery.IncrementModelCalls(st); cerr != nil {
+						fmt.Fprintln(os.Stderr, "recovery model calls:", cerr)
+						return exitError
+					}
+					diagBackend, closeDiag, berr := openSessionBackend(*dir, *executor, *recoveryModel)
+					if berr != nil {
+						_ = st.AppendEvent("", "recovery_model_error", berr.Error())
+						fmt.Fprintln(os.Stderr, "recovery diagnosis backend:", berr)
+					} else {
+						model := &recovery.Model{Backend: diagBackend, Timeout: 90 * time.Second, Poll: time.Second}
+						suggestion, serr := model.Diagnose(ctx, strings.Join(decision.Evidence, "\n"))
+						closeDiag()
+						if serr != nil {
+							_ = st.AppendEvent("", "recovery_model_error", serr.Error())
+							fmt.Fprintln(os.Stderr, "recovery diagnosis:", serr)
+						} else {
+							_ = st.AppendEvent("", "recovery_model_suggestion", suggestion.Category+": "+suggestion.Reason)
+							if next, nerr := recovery.DecideWithSuggestion(st, obj, needsApproval, policy, &suggestion); nerr == nil {
+								decision = next
+							}
+						}
+					}
+				}
 			}
 			switch decision.Action {
 			case "retry":
@@ -768,7 +795,7 @@ func goalRun(args []string) int {
 			case "replan":
 				// Fall through to the existing bounded replanner below.
 			default:
-				if decision.Category == "unknown_execution_state" {
+				if decision.Category == "unknown_execution_state" || decision.Category == "unexpected_side_effect" {
 					if err := recovery.SetPending(st, decision); err != nil {
 						fmt.Fprintln(os.Stderr, "recovery pending:", err)
 						return exitError

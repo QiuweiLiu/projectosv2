@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS reviews (
 	task_id          TEXT NOT NULL,
 	artifact_version TEXT NOT NULL,
 	kind             TEXT NOT NULL,
+	plan_version     INTEGER NOT NULL DEFAULT 0,
 	findings         TEXT NOT NULL,
 	blocking         INTEGER NOT NULL,
 	prompt_chars     INTEGER NOT NULL DEFAULT 0,
@@ -193,6 +194,7 @@ func (s *Store) migrate() error {
 		}
 	}
 	for name, ddl := range map[string]string{
+		"plan_version":    "ALTER TABLE reviews ADD COLUMN plan_version INTEGER NOT NULL DEFAULT 0",
 		"prompt_chars":    "ALTER TABLE reviews ADD COLUMN prompt_chars INTEGER NOT NULL DEFAULT 0",
 		"output_chars":    "ALTER TABLE reviews ADD COLUMN output_chars INTEGER NOT NULL DEFAULT 0",
 		"prompt_tokens":   "ALTER TABLE reviews ADD COLUMN prompt_tokens INTEGER NOT NULL DEFAULT 0",
@@ -858,11 +860,11 @@ func (s *Store) AddReview(rev domain.Review) error {
 		blocking = 1
 	}
 	_, err = s.db.Exec(`INSERT INTO reviews
-		(id, task_id, artifact_version, kind, findings, blocking, prompt_chars, output_chars,
+		(id, task_id, artifact_version, kind, plan_version, findings, blocking, prompt_chars, output_chars,
 		 prompt_tokens, output_tokens, usage_estimated, at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		fmt.Sprintf("%s-%s-%d", rev.TaskID, rev.ArtifactVersion, time.Now().UnixNano()),
-		string(rev.TaskID), rev.ArtifactVersion, string(rev.Kind), string(raw), blocking,
+		string(rev.TaskID), rev.ArtifactVersion, string(rev.Kind), rev.PlanVersion, string(raw), blocking,
 		rev.PromptChars, rev.OutputChars, rev.PromptTokens, rev.OutputTokens,
 		boolInt(rev.UsageEstimated), now())
 	return err
@@ -929,18 +931,21 @@ func (s *Store) ReviewsFor(taskID domain.TaskID) ([]domain.Review, error) {
 	if err != nil {
 		return nil, err
 	}
-	query := `SELECT id, task_id, artifact_version, kind, findings, at FROM reviews
-		WHERE task_id=? ORDER BY at`
-	switch {
-	case withTokens:
-		query = `SELECT id, task_id, artifact_version, kind, findings, at, prompt_chars, output_chars,
-			prompt_tokens, output_tokens, usage_estimated
-			FROM reviews WHERE task_id=? ORDER BY at`
-	case withUsage:
-		query = `SELECT id, task_id, artifact_version, kind, findings, at, prompt_chars, output_chars
-			FROM reviews WHERE task_id=? ORDER BY at`
+	withPlan, err := s.hasColumn("reviews", "plan_version")
+	if err != nil {
+		return nil, err
 	}
-	rows, err := s.db.Query(query, string(taskID))
+	columns := "id, task_id, artifact_version, kind, findings, at"
+	if withUsage {
+		columns += ", prompt_chars, output_chars"
+	}
+	if withTokens {
+		columns += ", prompt_tokens, output_tokens, usage_estimated"
+	}
+	if withPlan {
+		columns += ", plan_version"
+	}
+	rows, err := s.db.Query("SELECT "+columns+" FROM reviews WHERE task_id=? ORDER BY at", string(taskID))
 	if err != nil {
 		return nil, err
 	}
@@ -949,21 +954,21 @@ func (s *Store) ReviewsFor(taskID domain.TaskID) ([]domain.Review, error) {
 	for rows.Next() {
 		var rev domain.Review
 		var findings, at string
+		var estimated int
+		dest := []any{&rev.ID, &rev.TaskID, &rev.ArtifactVersion, &rev.Kind, &findings, &at}
+		if withUsage {
+			dest = append(dest, &rev.PromptChars, &rev.OutputChars)
+		}
 		if withTokens {
-			var estimated int
-			if err := rows.Scan(&rev.ID, &rev.TaskID, &rev.ArtifactVersion, &rev.Kind, &findings, &at,
-				&rev.PromptChars, &rev.OutputChars, &rev.PromptTokens, &rev.OutputTokens, &estimated); err != nil {
-				return nil, err
-			}
-			rev.UsageEstimated = estimated == 1
-		} else if withUsage {
-			if err := rows.Scan(&rev.ID, &rev.TaskID, &rev.ArtifactVersion, &rev.Kind, &findings, &at,
-				&rev.PromptChars, &rev.OutputChars); err != nil {
-				return nil, err
-			}
-		} else if err := rows.Scan(&rev.ID, &rev.TaskID, &rev.ArtifactVersion, &rev.Kind, &findings, &at); err != nil {
+			dest = append(dest, &rev.PromptTokens, &rev.OutputTokens, &estimated)
+		}
+		if withPlan {
+			dest = append(dest, &rev.PlanVersion)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, err
 		}
+		rev.UsageEstimated = estimated == 1
 		_ = json.Unmarshal([]byte(findings), &rev.Findings)
 		if rev.At, err = time.Parse(time.RFC3339Nano, at); err != nil {
 			return nil, fmt.Errorf("review %s: bad timestamp %q: %w", rev.ID, at, err)

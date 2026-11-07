@@ -9,13 +9,16 @@ SQLite、`runs`/`evidence` 和完成后的 `delivery.json`。
 
 - Objective 状态为 `completed`；
 - `delivery.json` 可读，`status` 为 `completed`，且所有 command check 为 `OK`；
-- 最新 objective acceptance review（若存在）不是 blocking；
+- 最新 objective acceptance review（若存在）不是 blocking，且该 review 显式绑定到
+  当前 plan version（旧版 review 不能否决新计划）；
 - 每个 Task 状态为 `accepted`，且能从 `runs.result` 取到内容；
 - 内容 SHA256 与 `evidence.digest` 一致；
 - 路径不是绝对路径、不含 `..`，单文件 ≤5MB，合计 ≤20MB。
 
 `out/` 不再被扫描：即使里面多出一个文件，只要没有对应 accepted Task，就不会发布。
 被阻断、失败、取消、未完成的目标不会发布；它们的旧条目会在下一次发布时消失。
+单个 Objective 的路径越界、超大产物、evidence 不匹配会记录到 `skipped` 并跳过，不会
+阻止同 Project 其他健康 Objective 刷新。
 
 ## Manifest
 

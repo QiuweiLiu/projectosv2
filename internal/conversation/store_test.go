@@ -236,3 +236,33 @@ func TestPermissionEventDeduplication(t *testing.T) {
 		t.Fatalf("other = %v %v", ok, err)
 	}
 }
+
+func TestContextVersionPersistsAndRefreshes(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "conversations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	c, err := st.Create("ctx", "proj-1", "", "/tmp/chat", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkContextSent(c.ID, "hash-1"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := st.Get(c.ID)
+	if err != nil || !ok || !got.ContextSent || got.ContextVersion != "hash-1" {
+		t.Fatalf("conversation = %+v %v %v", got, ok, err)
+	}
+	if err := st.MarkContextSent(c.ID, "hash-2"); err != nil {
+		t.Fatal(err)
+	}
+	got, _, _ = st.Get(c.ID)
+	if got.ContextVersion != "hash-2" {
+		t.Fatalf("context version = %q", got.ContextVersion)
+	}
+	list, err := st.List(10)
+	if err != nil || len(list) != 1 || list[0].ContextVersion != "hash-2" {
+		t.Fatalf("list = %+v %v", list, err)
+	}
+}

@@ -336,7 +336,8 @@ func nextState(status goal.Status, hasPlan bool, r Report) (State, string) {
 				return StateManualIntervention, "inspect"
 			}
 			if r.Failure != nil && (r.Failure.Category == "unknown_execution_state" ||
-				r.Failure.Category == "environment_failure" || r.Failure.Category == "unknown") {
+				r.Failure.Category == "unexpected_side_effect" || r.Failure.Category == "environment_failure" ||
+				r.Failure.Category == "unknown") {
 				return StateManualIntervention, "inspect"
 			}
 			return StateBlocked, "resolve_blocker"

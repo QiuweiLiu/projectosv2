@@ -22,14 +22,16 @@ type Policy struct {
 }
 
 type Decision struct {
-	Action           string `json:"action"` // retry | replan | approve | stop
-	TaskID           string `json:"taskId,omitempty"`
-	Category         string `json:"category,omitempty"`
-	Reason           string `json:"reason"`
-	Recoverable      bool   `json:"recoverable"`
-	RequiresApproval bool   `json:"requiresApproval"`
-	RecoveryCount    int    `json:"recoveryCount"`
-	MaxRecoveries    int    `json:"maxRecoveries"`
+	Action           string   `json:"action"` // retry | replan | approve | stop
+	TaskID           string   `json:"taskId,omitempty"`
+	Category         string   `json:"category,omitempty"`
+	Reason           string   `json:"reason"`
+	Recoverable      bool     `json:"recoverable"`
+	RequiresApproval bool     `json:"requiresApproval"`
+	RecoveryCount    int      `json:"recoveryCount"`
+	MaxRecoveries    int      `json:"maxRecoveries"`
+	ModelAssisted    bool     `json:"modelAssisted"`
+	Evidence         []string `json:"evidence,omitempty"`
 }
 
 type Pending struct {
@@ -40,11 +42,19 @@ type Pending struct {
 }
 
 const (
-	pendingKey = "recovery_pending"
-	countKey   = "recovery_count"
+	pendingKey    = "recovery_pending"
+	countKey      = "recovery_count"
+	modelCallsKey = "recovery_model_calls"
 )
 
 func Decide(st *store.Store, obj goal.Objective, needsApproval bool, policy Policy) (Decision, error) {
+	return DecideWithSuggestion(st, obj, needsApproval, policy, nil)
+}
+
+// DecideWithSuggestion lets a bounded model classification refine only the
+// ambiguous "unknown" category. The category is validated; action, budget and
+// attempt limits still come from Kernel policy.
+func DecideWithSuggestion(st *store.Store, obj goal.Objective, needsApproval bool, policy Policy, suggestion *Suggestion) (Decision, error) {
 	if policy.AttemptCap <= 0 {
 		policy.AttemptCap = 3
 	}
@@ -53,6 +63,11 @@ func Decide(st *store.Store, obj goal.Objective, needsApproval bool, policy Poli
 		return Decision{}, err
 	}
 	d := Decision{RecoveryCount: report.RecoveryCount, MaxRecoveries: policy.MaxRecoveries}
+	if report.Failure != nil && suggestion != nil && report.Failure.Category == "unknown" &&
+		suggestedCategories[suggestion.Category] {
+		applySuggestion(report.Failure, suggestion)
+		d.ModelAssisted = true
+	}
 	if report.Failure == nil {
 		d.Action = "stop"
 		d.Reason = "no blocking failure to recover"
@@ -61,6 +76,7 @@ func Decide(st *store.Store, obj goal.Objective, needsApproval bool, policy Poli
 	d.TaskID = report.Failure.TaskID
 	d.Category = report.Failure.Category
 	d.Reason = report.Failure.Category
+	d.Evidence = append([]string(nil), report.Failure.Evidence...)
 	d.Recoverable = report.Failure.Recoverable
 	d.RequiresApproval = report.Failure.RequiresApproval
 	// Human approval is not an automatic recovery: it is allowed even after the
@@ -118,6 +134,28 @@ func Decide(st *store.Store, obj goal.Objective, needsApproval bool, policy Poli
 	return d, nil
 }
 
+func applySuggestion(failure *progress.Failure, suggestion *Suggestion) {
+	switch suggestion.Category {
+	case "artifact_mismatch", "review_blocked", "provider_transient":
+		failure.Category = suggestion.Category
+		failure.Recoverable = true
+		failure.Action = "retry"
+	case "dependency_failure":
+		failure.Category = suggestion.Category
+		failure.Action = "replan"
+	case "permission_denied", "resource_exhaustion":
+		failure.Category = suggestion.Category
+		failure.RequiresApproval = true
+		failure.Action = "approve"
+	case "environment_failure", "plan_invalid":
+		failure.Category = suggestion.Category
+		failure.Action = "inspect"
+	case "unknown_execution_state", "unexpected_side_effect":
+		failure.Category = suggestion.Category
+		failure.Action = "inspect"
+	}
+}
+
 func Count(st *store.Store) (int, error) {
 	raw, err := st.GetMeta(countKey)
 	if err != nil || raw == "" {
@@ -140,6 +178,30 @@ func Budget(st *store.Store) int {
 		return 2
 	}
 	return n
+}
+
+func ModelCalls(st *store.Store) (int, error) {
+	raw, err := st.GetMeta(modelCallsKey)
+	if err != nil || raw == "" {
+		return 0, err
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("recovery model calls %q: %w", raw, err)
+	}
+	return n, nil
+}
+
+func IncrementModelCalls(st *store.Store) (int, error) {
+	n, err := ModelCalls(st)
+	if err != nil {
+		return 0, err
+	}
+	n++
+	if err := st.SetMeta(modelCallsKey, strconv.Itoa(n)); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 func Increment(st *store.Store) (int, error) {

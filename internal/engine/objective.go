@@ -87,6 +87,7 @@ func (e *Engine) JudgeObjective(ctx context.Context, obj goal.Objective, plan go
 		TaskID:          taskID,
 		ArtifactVersion: version,
 		Kind:            domain.ReviewObjective,
+		PlanVersion:     obj.PlanVersion,
 		Findings:        findings,
 		PromptChars:     outcome.PromptChars,
 		OutputChars:     outcome.OutputChars,

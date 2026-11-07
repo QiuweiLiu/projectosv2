@@ -38,6 +38,19 @@ Recovery 不是第二套 Scheduler。它读取既有 Task/Run/Review 事实，�
 恢复后重新打开仅因上游阻塞的 pending Task（`last_error LIKE 'dependency blocked%'`），
 已验收 Task 保持不变，Engine 重新计算 READY。
 
+## 可选模型辅助分类
+
+默认关闭，保持确定性、零额外模型调用。设置：
+
+```sh
+kernel goal run --dir D --recovery-model provider/model
+```
+
+只有在确定性诊断落在 `unknown`（不是 `unknown_execution_state`）且该 Objective 尚未
+用过模型诊断时，才发起一次短会话；结果只能改变 **category**，动作、预算、attempt cap
+仍由 `recovery.Decide` 校验。模型调用次数记录在 `meta.recovery_model_calls`，最多 1 次，
+并写 `recovery_model_suggestion` / `recovery_model_error` 事件。
+
 ## 操作
 
 ```sh

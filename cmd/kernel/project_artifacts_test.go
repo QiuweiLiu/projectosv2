@@ -233,16 +233,17 @@ func TestPublishRemovesArtifactsFromNoLongerEligibleObjective(t *testing.T) {
 	}
 }
 
-func TestPublishRefusesEvidenceMismatchAndKeepsOldTree(t *testing.T) {
+func TestPublishSkipsEvidenceMismatchWithoutBlockingOthers(t *testing.T) {
 	root := t.TempDir()
 	ws := newWorkspace(root)
 	project, err := ws.CreateProject("Evidence")
 	if err != nil {
 		t.Fatal(err)
 	}
-	completedObjective(t, root, project.ID, "obj-a", "notes.txt", "trusted", goal.StatusCompleted, goal.StatusCompleted)
+	completedObjective(t, root, project.ID, "obj-bad", "bad.txt", "trusted", goal.StatusCompleted, goal.StatusCompleted)
+	completedObjective(t, root, project.ID, "obj-good", "good.txt", "good", goal.StatusCompleted, goal.StatusCompleted)
 	publishForTest(t, root, project.ID)
-	db, err := sql.Open("sqlite", filepath.Join(root, "projects", "obj-a", "kernel.db"))
+	db, err := sql.Open("sqlite", filepath.Join(root, "projects", "obj-bad", "kernel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,17 +252,22 @@ func TestPublishRefusesEvidenceMismatchAndKeepsOldTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Close()
-	all, _ := newWorkspace(root).list()
-	if _, err := publishProjectArtifacts(root, project.ID, all); err == nil || !strings.Contains(err.Error(), "evidence digest") {
-		t.Fatalf("mismatch was not rejected: %v", err)
+	manifest := publishForTest(t, root, project.ID)
+	if len(manifest.Entries) != 1 || manifest.Entries[0].ObjectiveID != "obj-good" {
+		t.Fatalf("entries = %+v", manifest.Entries)
 	}
-	raw, err := os.ReadFile(filepath.Join(sharedArtifactDir(root, project.ID), "obj-a", "notes.txt"))
-	if err != nil || string(raw) != "trusted" {
-		t.Fatalf("old shared tree was damaged: %q %v", raw, err)
+	if len(manifest.Skipped) != 1 || !strings.Contains(manifest.Skipped[0].Reason, "evidence digest") {
+		t.Fatalf("skipped = %+v", manifest.Skipped)
+	}
+	if _, err := os.Stat(filepath.Join(sharedArtifactDir(root, project.ID), "obj-bad", "bad.txt")); !os.IsNotExist(err) {
+		t.Fatalf("bad objective leaked into shared tree: %v", err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(sharedArtifactDir(root, project.ID), "obj-good", "good.txt")); err != nil || string(raw) != "good" {
+		t.Fatalf("good objective was blocked: %q %v", raw, err)
 	}
 }
 
-func TestManifestRejectsPathTraversal(t *testing.T) {
+func TestManifestSkipsPathTraversalWithoutPublishing(t *testing.T) {
 	root := t.TempDir()
 	ws := newWorkspace(root)
 	project, err := ws.CreateProject("Evidence")
@@ -270,8 +276,12 @@ func TestManifestRejectsPathTraversal(t *testing.T) {
 	}
 	completedObjective(t, root, project.ID, "obj-a", "../escape.txt", "bad", goal.StatusCompleted, goal.StatusCompleted)
 	all, _ := ws.list()
-	if _, err := publishProjectArtifacts(root, project.ID, all); err == nil || !strings.Contains(err.Error(), "escapes") {
-		t.Fatalf("path traversal was not rejected: %v", err)
+	manifest, err := publishProjectArtifacts(root, project.ID, all)
+	if err != nil {
+		t.Fatalf("one bad objective must not abort publication: %v", err)
+	}
+	if len(manifest.Entries) != 0 || len(manifest.Skipped) != 1 || !strings.Contains(manifest.Skipped[0].Reason, "escapes") {
+		t.Fatalf("manifest = %+v", manifest)
 	}
 	if _, err := os.Stat(filepath.Join(root, "project-state", project.ID, "escape.txt")); !os.IsNotExist(err) {
 		t.Fatalf("path traversal wrote outside the objective directory: %v", err)
@@ -359,5 +369,44 @@ func TestManifestCanBeRebuiltFromAuthoritativeFacts(t *testing.T) {
 	manifest := publishForTest(t, root, project.ID)
 	if len(manifest.Entries) != 1 || manifest.Entries[0].ContentSHA256 == "" {
 		t.Fatalf("manifest was not rebuilt: %+v", manifest)
+	}
+}
+
+func TestPublishBindsObjectiveReviewToPlanVersion(t *testing.T) {
+	root := t.TempDir()
+	ws := newWorkspace(root)
+	project, _ := ws.CreateProject("PlanBinding")
+	completedObjective(t, root, project.ID, "obj-a", "notes.txt", "value", goal.StatusCompleted, goal.StatusCompleted)
+	dir := filepath.Join(root, "projects", "obj-a")
+	st, err := store.Open(filepath.Join(dir, "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddReview(domain.Review{TaskID: "objective:obj-a", ArtifactVersion: "old-plan",
+		Kind: domain.ReviewObjective, PlanVersion: 2,
+		Findings: []domain.Finding{{Severity: domain.SeverityP1, Code: "stale"}}}); err != nil {
+		st.Close()
+		t.Fatal(err)
+	}
+	st.Close()
+	manifest := publishForTest(t, root, project.ID)
+	if len(manifest.Entries) != 1 {
+		t.Fatalf("a review for another plan blocked publication: %+v", manifest)
+	}
+
+	st, err = store.Open(filepath.Join(dir, "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddReview(domain.Review{TaskID: "objective:obj-a", ArtifactVersion: "current-plan",
+		Kind: domain.ReviewObjective, PlanVersion: 1,
+		Findings: []domain.Finding{{Severity: domain.SeverityP1, Code: "current"}}}); err != nil {
+		st.Close()
+		t.Fatal(err)
+	}
+	st.Close()
+	manifest = publishForTest(t, root, project.ID)
+	if len(manifest.Entries) != 0 || len(manifest.Skipped) != 1 || !strings.Contains(manifest.Skipped[0].Reason, "objective acceptance") {
+		t.Fatalf("current-plan blocking review was ignored: %+v", manifest)
 	}
 }

@@ -158,14 +158,21 @@ func publishableArtifacts(p project, staging string, total *int64, seen map[stri
 		return nil, "", fmt.Errorf("objective id: %w", err)
 	}
 	now := time.Now().UTC()
+	discard := func() {
+		_ = os.RemoveAll(filepath.Join(staging, p.Obj.ID))
+	}
+	skip := func(reason string) ([]ArtifactEntry, string, error) {
+		discard()
+		return nil, reason, nil
+	}
 	deliveryPath := filepath.Join(p.Dir, "delivery.json")
 	info, err := os.Lstat(deliveryPath)
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return nil, "completed objective has no regular delivery.json", nil
+		return skip("completed objective has no regular delivery.json")
 	}
 	raw, err := os.ReadFile(deliveryPath)
 	if err != nil {
-		return nil, "completed objective has no readable delivery.json", nil
+		return skip("completed objective has no readable delivery.json")
 	}
 	var report struct {
 		Status string `json:"status"`
@@ -175,17 +182,17 @@ func publishableArtifacts(p project, staging string, total *int64, seen map[stri
 		} `json:"checks"`
 	}
 	if err := json.Unmarshal(raw, &report); err != nil {
-		return nil, "delivery.json is not valid JSON", nil
+		return skip("delivery.json is not valid JSON")
 	}
 	if report.Status != string(goal.StatusCompleted) {
-		return nil, "delivery.json status is " + report.Status, nil
+		return skip("delivery.json status is " + report.Status)
 	}
 	if report.Plan != 0 && report.Plan != p.Obj.PlanVersion {
-		return nil, "delivery.json belongs to another plan version", nil
+		return skip("delivery.json belongs to another plan version")
 	}
 	for _, check := range report.Checks {
 		if !check.OK {
-			return nil, "delivery command check failed", nil
+			return skip("delivery command check failed")
 		}
 	}
 	deliverySum := sha256.Sum256(raw)
@@ -193,19 +200,21 @@ func publishableArtifacts(p project, staging string, total *int64, seen map[stri
 
 	st, err := store.OpenReadOnly(filepath.Join(p.Dir, "kernel.db"))
 	if err != nil {
-		return nil, "", fmt.Errorf("open objective database: %w", err)
+		return skip("cannot open objective database")
 	}
 	defer st.Close()
-	if blocking, found, err := latestObjectiveReview(st, p.Obj.ID); err != nil {
-		return nil, "", err
+	if blocking, found, err := latestObjectiveReview(st, p.Obj.ID, p.Obj.PlanVersion); err != nil {
+		return skip("cannot read objective acceptance review")
 	} else if found && blocking {
-		return nil, "latest objective acceptance review is blocking", nil
+		return skip("latest objective acceptance review is blocking")
 	}
 	tasks, err := st.List()
 	if err != nil {
-		return nil, "", err
+		return skip("cannot list objective tasks")
 	}
 	var entries []ArtifactEntry
+	localSeen := map[string]string{}
+	var localBytes int64
 	for _, task := range tasks {
 		if task.ObjectiveID != p.Obj.ID {
 			continue
@@ -215,33 +224,33 @@ func publishableArtifacts(p project, staging string, total *int64, seen map[stri
 		}
 		rel, err := cleanArtifactRel(task.ArtifactPath)
 		if err != nil {
-			return nil, "", fmt.Errorf("task %s: %w", task.ID, err)
+			return skip(fmt.Sprintf("task %s: %v", task.ID, err))
 		}
 		key := p.Obj.ID + "\x00" + rel
-		if other, ok := seen[key]; ok {
-			return nil, "", fmt.Errorf("tasks %s and %s publish the same artifact %q", other, task.ID, rel)
+		if _, ok := localSeen[key]; ok {
+			return skip(fmt.Sprintf("task %s publishes a duplicate artifact %q", task.ID, rel))
 		}
 		content, err := st.AcceptedResult(task.ID)
 		if err != nil {
-			return nil, "", fmt.Errorf("task %s has no accepted artifact: %w", task.ID, err)
+			return skip(fmt.Sprintf("task %s has no accepted artifact", task.ID))
 		}
 		if len(content) > maxSharedFileBytes {
-			return nil, "", fmt.Errorf("artifact %s exceeds %d bytes", rel, maxSharedFileBytes)
+			return skip(fmt.Sprintf("artifact %s exceeds %d bytes", rel, maxSharedFileBytes))
 		}
-		if *total+int64(len(content)) > maxSharedTotalBytes {
-			return nil, "", fmt.Errorf("project shared artifacts exceed %d bytes", maxSharedTotalBytes)
+		if *total+localBytes+int64(len(content)) > maxSharedTotalBytes {
+			return skip(fmt.Sprintf("project shared artifacts exceed %d bytes", maxSharedTotalBytes))
 		}
 		sum := sha256.Sum256([]byte(content))
 		digest := hex.EncodeToString(sum[:])
 		evidence, err := latestAcceptedEvidence(st, task.ID)
 		if err != nil {
-			return nil, "", err
+			return skip(fmt.Sprintf("task %s evidence is unreadable", task.ID))
 		}
 		if evidence.Digest == "" {
-			return nil, fmt.Sprintf("task %s has no accepted evidence", task.ID), nil
+			return skip(fmt.Sprintf("task %s has no accepted evidence", task.ID))
 		}
 		if evidence.Digest != digest {
-			return nil, "", fmt.Errorf("task %s accepted result does not match evidence digest", task.ID)
+			return skip(fmt.Sprintf("task %s accepted result does not match evidence digest", task.ID))
 		}
 		target := filepath.Join(staging, p.Obj.ID, rel)
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
@@ -254,8 +263,8 @@ func publishableArtifacts(p project, staging string, total *int64, seen map[stri
 		if err != nil || sha256.Sum256(wrote) != sum {
 			return nil, "", fmt.Errorf("shared artifact %s failed content verification", rel)
 		}
-		*total += int64(len(content))
-		seen[key] = string(task.ID)
+		localBytes += int64(len(content))
+		localSeen[key] = string(task.ID)
 		entries = append(entries, ArtifactEntry{
 			ProjectID: p.ProjectID, ObjectiveID: p.Obj.ID, TaskID: string(task.ID),
 			ArtifactPath: filepath.ToSlash(rel), ContentSHA256: digest,
@@ -265,18 +274,29 @@ func publishableArtifacts(p project, staging string, total *int64, seen map[stri
 		})
 	}
 	if len(entries) == 0 {
-		return nil, "completed objective has no accepted artifacts", nil
+		return skip("completed objective has no accepted artifacts")
+	}
+	*total += localBytes
+	for key, task := range localSeen {
+		seen[key] = task
 	}
 	return entries, "", nil
 }
 
-func latestObjectiveReview(st *store.Store, objectiveID string) (bool, bool, error) {
+func latestObjectiveReview(st *store.Store, objectiveID string, planVersion int) (bool, bool, error) {
 	reviews, err := st.ReviewsFor(domain.TaskID("objective:" + objectiveID))
 	if err != nil || len(reviews) == 0 {
 		return false, false, err
 	}
-	last := reviews[len(reviews)-1]
-	return last.Blocking(), true, nil
+	for i := len(reviews) - 1; i >= 0; i-- {
+		// Only a review explicitly bound to the current plan can veto publication.
+		// Legacy unbound (0) rows cannot be proven to describe this plan.
+		if reviews[i].PlanVersion != planVersion {
+			continue
+		}
+		return reviews[i].Blocking(), true, nil
+	}
+	return false, false, nil
 }
 
 func latestAcceptedEvidence(st *store.Store, taskID domain.TaskID) (domain.Evidence, error) {

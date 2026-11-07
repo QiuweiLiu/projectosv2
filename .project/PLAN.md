@@ -15,7 +15,7 @@ P5 已交付：Metrics 正确性、可信共享产物、结构化 Progress、有
 - 关闭/重开桌面后历史、Session、Objective/Task 状态一致。
 - 工具调用默认 ask，批准只对本次请求生效。
 - `runNow` 不绕过确认；Objective acceptance 阻断时不交付。
-- 现有 CLI、Workspace、272 测试保持兼容。
+- 现有 CLI、Workspace、281 测试保持兼容。
 
 ## Not now
 Windows/Linux、逐工具托管任务审批、Project 级复杂调度、多设备同步、日志轮转。

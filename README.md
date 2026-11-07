@@ -30,7 +30,7 @@ P2 可用性已完成并验证：
 - **P5**：可信共享产物 Manifest、结构化 Progress、有界自主恢复、按需 Evidence Context、
   Cockpit 恢复/证据展示、SSE 游标恢复与故障注入测试。
 
-272 项 Go 测试 + `-race` + `vet` 全绿。边界与未实现项见 `docs/api.md` 第 11 节和
+281 项 Go 测试 + `-race` + `vet` 全绿。边界与未实现项见 `docs/api.md` 第 11 节和
 `.project/HANDOFF.md`。
 
 ## 快速开始
