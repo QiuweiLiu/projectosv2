@@ -60,3 +60,9 @@ desktop/build/ProjectOS.app/Contents/MacOS/ProjectOS --check
 - 窗口是 WebView；原生菜单目前只有“选择工作区…”和退出，没有托盘、通知或自动更新。
 - 聊天工作台的“任务”按钮回到 Cockpit；Kernel 的轮询页面仍可用。
 - 不签名/不公证；`build.sh` 只做 ad-hoc 签名，适合本机使用。
+
+## 视觉方向
+
+界面采用 "ink rail + warm paper + oxidized copper" 的安静工作台方向：深色侧栏承载导航，
+暖纸色主区承载内容，单一铜色用于主要动作、选中态和实时状态。视觉方向参考并改编自
+[unslop](https://github.com/heydamir/unslop) by Damir Sokolovsky（CC BY 4.0）。

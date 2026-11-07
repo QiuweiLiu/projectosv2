@@ -3,6 +3,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ProjectOS</title>
 <link rel="icon" href="data:,">
+<!-- Visual direction adapted from unslop by Damir Sokolovsky (CC BY 4.0). -->
 <style>
 :root{
   --ink:#1f2328;--muted:#6b7280;--faint:#9aa1ab;
@@ -164,7 +165,94 @@ details[open] summary::before{content:"▾ "}
   .main{padding:1.2rem 1rem 3rem}
   .actions{justify-content:flex-start}
 }
-</style></head><body>
+</style>
+<style id="p6-refresh">
+/* P6 visual refresh: ink rail, warm paper, oxidized copper accent. */
+:root{
+  --ink:#24221d;--muted:#746d61;--faint:#9b9384;
+  --bg:#f2eee4;--panel:#fffdf7;--line:#ddd6c8;--line-strong:#c9c0ae;
+  --ok:#3d6a50;--ok-bg:#edf4ee;--bad:#9c3b31;--bad-bg:#fbefed;
+  --warn:#875b1a;--warn-bg:#fbf3e3;--run:#8a4325;--run-bg:#f3e7de;
+  --radius:10px;--shadow:none;
+}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);
+  font:13px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro SC","PingFang SC",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased}
+.app{grid-template-columns:268px minmax(0,1fr)}
+.side{background:#1d1c18;border-right:0;color:#eee8db}
+.brand{padding:18px 16px 14px}
+.brand b{color:#eee8db;font-size:15px;font-weight:600;letter-spacing:.01em}
+.brand .dot{background:#8a4325}
+.objs{padding:0 10px 14px;scrollbar-color:#4a463b transparent}
+.obj{padding:.65rem .7rem;border:0;border-radius:7px;color:#eee8db;margin-bottom:2px}
+.obj:hover{background:#28261f}
+.obj.on{background:#2b2820;border-color:transparent;box-shadow:inset 2px 0 0 #8a4325}
+.obj .g{color:#eee8db;font-size:12.5px}
+.obj .r{color:#a39b8b;font-size:10.5px}
+.newgoal{margin:10px;background:transparent;border:1px dashed #3a372e;color:#a39b8b;border-radius:8px;font-size:12px}
+.newgoal:hover{border-color:#6b6252;color:#eee8db;background:#28261f}
+.sidefoot{border-top:1px solid #312f27;color:#a39b8b}
+.sidefoot input{background:#151411;border-color:#3a372e;color:#eee8db;border-radius:6px}
+.sidefoot input::placeholder{color:#777163}
+.main{padding:28px 32px 56px;background:var(--bg)}
+.wrap{max-width:64rem}
+h1{font-size:1.35rem;line-height:1.4;font-weight:600;letter-spacing:-.015em}
+.goal{color:var(--muted);font-size:12.5px}
+.btn{padding:.42rem .8rem;border-radius:7px;border-color:var(--line-strong);background:var(--panel);font-size:12px;transition:background .12s,border-color .12s}
+.btn:hover{background:#fbf8f0;border-color:#b9b09e}
+.btn.primary{background:#8a4325;border-color:#8a4325;color:#fff}
+.btn.primary:hover{background:#6e321b;border-color:#6e321b}
+.btn.primary:disabled{background:#cfc7b8;border-color:#cfc7b8}
+.btn.danger{color:var(--bad);border-color:#e3c2bd}
+.btn.danger:hover{background:#fbf0ee}
+.btn.small{padding:.28rem .55rem;font-size:11px}
+button:focus-visible{outline:2px solid #8a4325;outline-offset:2px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:none;padding:1rem 1.1rem;margin-top:12px}
+.card-head{margin-bottom:10px}
+.card h2{font-size:11px;font-weight:600;letter-spacing:.01em;color:var(--muted);text-transform:none}
+.pill{border-radius:5px;font-size:10.5px;padding:.12rem .5rem;background:#f1ece1;color:#6f675a}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.run{background:var(--run-bg);color:var(--run)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.plain{background:#f1ece1;color:#6f675a}
+.report-text{font-size:13px;line-height:1.8;color:var(--ink)}
+.counts{font-size:11.5px;color:var(--muted)}
+.counts b{font-size:1.15rem;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+.bar{height:4px;background:#e4ddd0}
+.bar span{background:#8a4325}
+.node{background:var(--panel);border-color:var(--line);border-left-color:#c9c0ae;border-radius:8px;padding:.55rem .65rem}
+.node:hover{box-shadow:none;border-color:#b9b09e}
+.node.on{border-color:#b68d73;box-shadow:0 0 0 2px #efe2d8}
+.node .id{font-size:12px}
+.node .art{font-size:10.5px;color:var(--muted)}
+.node[data-status="accepted"]{border-left-color:var(--ok)}
+.node[data-status="running"]{border-left-color:var(--run);box-shadow:0 0 0 2px var(--run-bg)}
+.node[data-status="blocked"],.node[data-status="rejected"]{border-left-color:var(--bad)}
+.node[data-status="pending"]{border-left-color:#c28a2e}
+.node[data-status="superseded"]{border-left-color:#c9c0ae;opacity:.55}
+.graph path{stroke:#c9c0ae}
+.graph path.done{stroke:#9fbfae}
+.kv{font-size:12px;grid-template-columns:5.2rem 1fr}
+.kv div:nth-child(odd){color:var(--muted)}
+.mono{font-size:11px;color:#5c574d}
+.finding{border-top-color:#eee7da;font-size:12px}
+.finding .code{color:var(--faint)}
+.diffbox{background:#23201b;color:#e9e2d6;border-radius:7px;font-size:11px}
+.explain{background:#f8f3e9;border-color:#e4ddd0;border-radius:7px;font-size:12.5px;color:var(--ink)}
+.af{background:transparent;border-color:var(--line);border-radius:7px}
+.af-preview{background:#fbf8f0;border-color:#e4ddd0;font-size:11px;color:#5c574d}
+.model-row select{border-color:var(--line);border-radius:6px;background:var(--panel);font-size:12px}
+.tl{font-size:11.5px}
+.tl .ev{border-bottom-color:#eee7da;padding:.4rem 0}
+.tl .when{color:var(--faint);font-size:10.5px}
+.tl .what{color:var(--ink)}
+.form textarea{border-color:var(--line-strong);border-radius:8px;background:var(--panel);font-size:12.5px}
+.form textarea:focus{border-color:#b68d73;box-shadow:0 0 0 2px #efe2d8}
+.hint{font-size:11px;color:var(--faint)}
+</style>
+</head><body>
 <div class="app">
   <aside class="side">
     <div class="brand"><b><span class="dot"></span>ProjectOS</b><span class="pill plain" id="mode">…</span></div>
