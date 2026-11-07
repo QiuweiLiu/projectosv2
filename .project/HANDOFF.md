@@ -34,7 +34,7 @@ Status: p5（可信产物/Progress/有界恢复/Evidence Context/Cockpit）
   → 交付 completed；objective review 记录实测 token。
 - `runNow=true` 实测只到 `planned`，tasks 表 0 条。
 - `/chat` 浏览器发送/流式/项目过滤/工具卡片已验证；桌面 `--check` 通过。
-- 基线 HEAD：`e5cfec4`；P3.0–P3.2 提交 `7fa3b9a`；P4 提交 `dfa913c`；P4 修复 `345187c`；P5 提交 `af17185`；P5 审查修复 `7d84920`；审查 follow-up `2c14c16`；四项修复 `81a760a`；seed 清理 `4d2a392`，均已 push 到 `origin/main`。
+- 基线 HEAD：`e5cfec4`；P3.0–P3.2 提交 `7fa3b9a`；P4 提交 `dfa913c`；P4 修复 `345187c`；P5 提交 `af17185`；P5 审查修复 `7d84920`；审查 follow-up `2c14c16`；四项修复 `81a760a`；seed 清理 `4d2a392`，已 push。
 - P5 真实：A 自动恢复（T1 失败→重试→T2→交付）；B/C 同 Project 三个 Objective，B/C 真实
   worker 读 Manifest 产物并分别写 `metric_b=42`、summary；C kill -9 后 unknown 拒绝重试，
   人工 `recover --approve --task` 后完成；Metrics 实测 B 4457/127、C 4183/208 tokens。
