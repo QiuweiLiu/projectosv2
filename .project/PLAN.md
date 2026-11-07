@@ -1,21 +1,20 @@
 # Plan
 
 ## Now
-P5 已交付：Metrics 正确性、可信共享产物、结构化 Progress、有界自主恢复、
-按需 Evidence Context、Cockpit 恢复/证据展示；P3.5 极端故障注入仍部分。
+P6 可靠性加固：P6.0/P6.1 关键项完成，P6.2 长会话验证完成，P6.3 完成 Task A 单样本。
+下一步扩大真实对照并做有证据支持的优化。
 
 ## Steps
-1. 用真实目标复核 Recovery/Evidence 的分类与相关性。
-2. 补 P3.5 磁盘满、只读挂载、运行中 SQLite 失效、OpenCode Server 退出重连。
-3. 桌面慢消费者/长会话压力回放；消息保留与日志轮转。
-4. 只有在真实使用暴露问题后，才扩展并发/多设备。
+1. 跑 Task B（数据分析）与 Task C（多阶段研究）真实对照，记录 hidden test、wall/tokens。
+2. 按样本评估 Planner/Reviewer/Acceptance 成本；只做证据支持的默认策略调整。
+3. 补磁盘满、只读挂载、WAL、OpenCode Server 退出重连故障注入。
+4. 维持 Manifest/Evidence/Recovery 的现有正确性门禁，不新增第二套状态机。
 
 ## Acceptance
-- 聊天不产生 Objective；转托管必须人工确认计划。
-- 关闭/重开桌面后历史、Session、Objective/Task 状态一致。
-- 工具调用默认 ask，批准只对本次请求生效。
-- `runNow` 不绕过确认；Objective acceptance 阻断时不交付。
-- 现有 CLI、Workspace、281 测试保持兼容。
+- 异常不产生虚假完成、重复副作用或越权继续。
+- Manifest 并发读写不跨版本组合；预算内不产生未闭合证据块。
+- 已完成 Objective 的 Task 不被误标为已发布。
+- 现有 CLI、Workspace、298 测试保持兼容；B/C 实验条件可复现。
 
 ## Not now
-Windows/Linux、逐工具托管任务审批、Project 级复杂调度、多设备同步、日志轮转。
+Windows/Linux、逐工具托管审批、分布式组件、向量数据库、大规模付费模型实验。

@@ -6,8 +6,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"projectos/kernel/internal/domain"
+	"projectos/kernel/internal/evidence"
 	"projectos/kernel/internal/goal"
 	"projectos/kernel/internal/store"
 )
@@ -79,8 +81,11 @@ func TestEvidenceContextBudgetStillFindsExplicitReference(t *testing.T) {
 	if !strings.Contains(ctx, "target-artifact-29") {
 		t.Fatalf("explicit reference was truncated away:\n%s", ctx)
 	}
-	if len(ctx) > 4096+600 {
+	if len(ctx) > 4096 {
 		t.Fatalf("context exceeded budget: %d", len(ctx))
+	}
+	if !utf8.ValidString(ctx) {
+		t.Fatal("context contains invalid UTF-8")
 	}
 }
 
@@ -110,5 +115,44 @@ func TestEvidenceRejectsUntrustedContentAsFact(t *testing.T) {
 	ctx := ws.ProjectContextFor(project.ID, "do a thing")
 	if !strings.Contains(ctx, "IN PROGRESS") && !strings.Contains(ctx, "UNVERIFIED") {
 		t.Fatalf("in-progress objective not labeled:\n%s", ctx)
+	}
+}
+
+func TestEvidenceTrustLevelsTrackPublicationState(t *testing.T) {
+	root := t.TempDir()
+	ws := newWorkspace(root)
+	project, _ := ws.CreateProject("Trust")
+	completedObjective(t, root, project.ID, "obj-a", "a.txt", "value", goal.StatusCompleted, goal.StatusCompleted)
+
+	idx, err := ws.BuildEvidenceIndex(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	find := func(obj string) evidence.Entry {
+		for _, entry := range idx.Entries {
+			if entry.ObjectiveID == obj && entry.Kind == evidence.KindArtifact {
+				return entry
+			}
+		}
+		t.Fatalf("missing artifact for %s", obj)
+		return evidence.Entry{}
+	}
+	if got := find("obj-a").Trust; got != evidence.TrustObjectiveAccepted {
+		t.Fatalf("before publish trust = %s", got)
+	}
+	publishForTest(t, root, project.ID)
+	idx, err = ws.BuildEvidenceIndex(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := find("obj-a").Trust; got != evidence.TrustPublished {
+		t.Fatalf("after publish trust = %s", got)
+	}
+
+	completedObjective(t, root, project.ID, "obj-active", "b.txt", "active", goal.StatusActive, goal.StatusCompleted)
+	ws.invalidate()
+	idx, _ = ws.BuildEvidenceIndex(project.ID)
+	if got := find("obj-active").Trust; got != evidence.TrustTaskAccepted {
+		t.Fatalf("active objective task trust = %s", got)
 	}
 }

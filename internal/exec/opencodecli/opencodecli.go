@@ -82,6 +82,9 @@ func (b *Backend) Start(ctx context.Context, req exec.StartRequest) (exec.StartR
 	if err != nil {
 		return exec.StartResult{}, err
 	}
+	if err := writeSeedFiles(dir, req.Files, seed); err != nil {
+		return exec.StartResult{}, err
+	}
 	if req.Attempt > 1 {
 		b.seedPreviousArtifact(dir, string(req.TaskID), req.ArtifactPath)
 	}
@@ -238,6 +241,28 @@ func (b *Backend) get(id string) (*run, error) {
 
 // materialize prepares the task directory: a git worktree when the base is a
 // repository (cheap, isolated, diff-able), otherwise a plain copy.
+// writeSeedFiles materializes accepted dependency artifacts into the isolated
+// worker directory. They are added to the seed digest map so changedFiles does
+// not report them as worker output.
+func writeSeedFiles(dir string, files map[string]string, seed map[string]string) error {
+	for rawPath, content := range files {
+		rel := filepath.Clean(strings.TrimSpace(rawPath))
+		if rel == "" || rel == "." || filepath.IsAbs(rel) || rel == ".." ||
+			strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("dependency path escapes the workspace: %q", rawPath)
+		}
+		target := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+			return err
+		}
+		seed[filepath.ToSlash(rel)] = digest(content)
+	}
+	return nil
+}
+
 func (b *Backend) materialize(dir string) (map[string]string, error) {
 	if isGitRepo(b.cfg.BaseDir) {
 		if seed, err := b.worktree(dir); err == nil {

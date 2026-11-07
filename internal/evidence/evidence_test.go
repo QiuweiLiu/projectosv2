@@ -122,10 +122,10 @@ func TestRenderDoesNotMistakeCompletedObjectiveForArtifact(t *testing.T) {
 		Title: "finished goal",
 	}}}
 	text := Render(Select(idx, "", 4096))
-	if !strings.Contains(text, "COMPLETED objective obj") {
+	if !strings.Contains(text, "PUBLISHED objective obj") {
 		t.Fatalf("objective rendered incorrectly:\n%s", text)
 	}
-	if strings.Contains(text, "VERIFIED artifact obj/") {
+	if strings.Contains(text, "PUBLISHED artifact obj/") {
 		t.Fatalf("objective was rendered as an empty artifact:\n%s", text)
 	}
 }

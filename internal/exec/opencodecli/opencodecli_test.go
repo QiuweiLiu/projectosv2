@@ -222,3 +222,52 @@ func TestRetryCopiesPreviousArtifact(t *testing.T) {
 		t.Fatalf("seeded = %q %v", raw, err)
 	}
 }
+
+func TestExecutorExitIsFailureNotSuccess(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "failing-opencode.sh")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'provider exploded' >&2\nexit 7\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b := New(Config{Model: "provider/model", Bin: bin, WorkRoot: t.TempDir()})
+	start, err := b.Start(context.Background(), exec.StartRequest{TaskID: "T1", Attempt: 1, Prompt: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitDone(t, b, start.ExternalID)
+	state, err := b.Observe(context.Background(), start.ExternalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Status != domain.RunFailed {
+		t.Fatalf("executor exit became %s", state.Status)
+	}
+	if !strings.Contains(state.Evidence, "provider exploded") {
+		t.Fatalf("failure evidence = %q", state.Evidence)
+	}
+}
+
+func TestDependencyFilesAreSeededAndNotReportedAsChanges(t *testing.T) {
+	work := t.TempDir()
+	b := New(Config{Model: "provider/model", Bin: fakeCLI(t), WorkRoot: work})
+	start, err := b.Start(context.Background(), exec.StartRequest{
+		TaskID: "T2", Attempt: 1, Prompt: "p", ArtifactPath: "test_calc.py",
+		Files: map[string]string{"calc.py": "def add(a, b):\n    return a + b\n"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitDone(t, b, start.ExternalID)
+	raw, err := os.ReadFile(filepath.Join(work, start.ExternalID, "calc.py"))
+	if err != nil || !strings.Contains(string(raw), "def add") {
+		t.Fatalf("dependency file = %q %v", raw, err)
+	}
+	artifact, err := b.Collect(context.Background(), start.ExternalID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range artifact.Files {
+		if file == "calc.py" {
+			t.Fatalf("dependency file was reported as worker change: %v", artifact.Files)
+		}
+	}
+}

@@ -357,9 +357,15 @@ func (e *Engine) Step(ctx context.Context) (StepResult, error) {
 		if e.sessionResume && task.Attempts > 0 {
 			session, _ = e.store.LastSession(task.ID, e.backend.Name())
 		}
+		seedFiles, ferr := e.dependencyFiles(task)
+		if ferr != nil {
+			_, _ = e.settle(run, task, exec.Artifact{}, domain.RunFailed, false, false, "dependency: "+ferr.Error())
+			out.Blocked = e.appendBlocked(out.Blocked, task.ID, "dependency")
+			continue
+		}
 		started, serr := e.backend.Start(ctx, exec.StartRequest{
 			TaskID: task.ID, Attempt: run.Attempt, Prompt: prompt, ArtifactPath: task.ArtifactPath,
-			SessionID: session,
+			SessionID: session, Files: seedFiles,
 		})
 		if serr != nil {
 			// A failed Start may still have created a session; never retry blindly.
@@ -741,6 +747,37 @@ func blockingOnly(findings []domain.Finding) []domain.Finding {
 		}
 	}
 	return out
+}
+
+// dependencyFiles materializes the accepted ancestor artifacts into the
+// worker's isolated directory. The prompt still carries a bounded preview, but
+// commands such as `python3 -m unittest` need the actual files.
+func (e *Engine) dependencyFiles(task domain.Task) (map[string]string, error) {
+	files := map[string]string{}
+	total := 0
+	ancestors, err := e.ancestors(task)
+	if err != nil {
+		return nil, err
+	}
+	for _, dep := range ancestors {
+		depTask, ok, err := e.store.Get(dep)
+		if err != nil {
+			return nil, err
+		}
+		if !ok || depTask.ArtifactPath == "" {
+			continue
+		}
+		content, err := e.store.AcceptedResult(dep)
+		if err != nil {
+			return nil, fmt.Errorf("dependency %s has no accepted artifact", dep)
+		}
+		if total+len(content) > 8<<20 {
+			continue
+		}
+		files[depTask.ArtifactPath] = content
+		total += len(content)
+	}
+	return files, nil
 }
 
 // retryFindings returns only a blocking review of the exact artifact state that

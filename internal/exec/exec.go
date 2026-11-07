@@ -26,6 +26,10 @@ type StartRequest struct {
 	// SessionID resumes a provider conversation on a retry. Empty means a new
 	// session; reviewers and planners always start fresh.
 	SessionID string
+	// Files are accepted dependency artifacts that must exist in the worker's
+	// isolated workspace before the agent starts. Paths are relative to the
+	// workspace root.
+	Files map[string]string
 }
 
 type StartResult struct {
@@ -47,6 +51,10 @@ type ReviewRequest struct {
 	Prior    []domain.Finding // blocking findings of the previous full review
 	RunID    string           // unique per run; used for session idempotency
 	Deps     []string         // dependency artifact paths already accepted
+	// SeedFiles materializes the delivered set for objective acceptance so a
+	// session that inspects its working directory sees the same files the
+	// prompt describes.
+	SeedFiles map[string]string
 }
 
 type Artifact struct {

@@ -83,6 +83,9 @@ func publishProjectArtifacts(root, projectID string, projects []project) (Artifa
 		return manifest, err
 	}
 	defer unlock()
+	if err := recoverArtifactTree(state); err != nil {
+		return manifest, err
+	}
 	staging, err := os.MkdirTemp(state, ".artifacts-staging-")
 	if err != nil {
 		return manifest, fmt.Errorf("create artifact staging: %w", err)
@@ -328,6 +331,45 @@ func cleanArtifactRel(path string) (string, error) {
 	return rel, nil
 }
 
+// recoverArtifactTree repairs the only crash window in swapArtifactTree: the
+// old tree was renamed but the new tree was not installed yet. It also removes
+// stale staging/old directories left by a killed publisher. Derived data is
+// never promoted over a complete tree.
+func recoverArtifactTree(state string) error {
+	entries, err := os.ReadDir(state)
+	if err != nil {
+		return err
+	}
+	target := filepath.Join(state, "artifacts")
+	var olds, stagings []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(entry.Name(), ".artifacts-old-"):
+			olds = append(olds, filepath.Join(state, entry.Name()))
+		case strings.HasPrefix(entry.Name(), ".artifacts-staging-"):
+			stagings = append(stagings, filepath.Join(state, entry.Name()))
+		}
+	}
+	if _, err := os.Stat(target); os.IsNotExist(err) && len(olds) > 0 {
+		sort.Strings(olds)
+		if err := os.Rename(olds[len(olds)-1], target); err != nil {
+			return fmt.Errorf("restore shared artifacts: %w", err)
+		}
+		olds = olds[:len(olds)-1]
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, dir := range append(olds, stagings...) {
+		if err := os.RemoveAll(dir); err != nil {
+			return fmt.Errorf("clean stale artifact directory %s: %w", filepath.Base(dir), err)
+		}
+	}
+	return nil
+}
+
 // swapArtifactTree replaces the shared tree with the staging directory. The old
 // tree is kept until the new one is in place, then removed best-effort.
 func swapArtifactTree(state, staging string) error {
@@ -394,27 +436,27 @@ func seedProjectArtifacts(dir string) error {
 	if filepath.Base(parent) == "projects" {
 		root = filepath.Dir(parent)
 	}
+	state := projectStateDir(root, meta.ID)
+	if _, err := os.Stat(state); err != nil {
+		_ = os.RemoveAll(filepath.Join(dir, "repo", "project-artifacts"))
+		return nil
+	}
+	// The manifest and its files are one version. Take the shared lock before
+	// reading either, otherwise a publisher can swap the tree between the
+	// manifest read and the file copy.
+	unlock, err := lockProjectRead(state)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	manifest, err := readProjectManifest(root, meta.ID)
 	if err != nil {
-		// A missing or invalid manifest means no trusted evidence. Clear any
-		// legacy copy rather than letting stale files masquerade as published
-		// artifacts.
 		_ = os.RemoveAll(filepath.Join(dir, "repo", "project-artifacts"))
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return fmt.Errorf("read shared artifact manifest: %w", err)
 	}
-	state := projectStateDir(root, meta.ID)
-	if _, err := os.Stat(state); err != nil {
-		_ = os.RemoveAll(filepath.Join(dir, "repo", "project-artifacts"))
-		return nil
-	}
-	unlock, err := lockProjectRead(state)
-	if err != nil {
-		return err
-	}
-	defer unlock()
 	source := sharedArtifactDir(root, meta.ID)
 	dest := filepath.Join(dir, "repo", "project-artifacts")
 	// Once a valid manifest is present, the old seed namespace is untrusted.
@@ -487,6 +529,15 @@ func readManifestForObjective(dir string) (ArtifactManifest, error) {
 	if filepath.Base(parent) == "projects" {
 		root = filepath.Dir(parent)
 	}
+	state := projectStateDir(root, projectID)
+	if _, err := os.Stat(state); err != nil {
+		return ArtifactManifest{}, err
+	}
+	unlock, err := lockProjectRead(state)
+	if err != nil {
+		return ArtifactManifest{}, err
+	}
+	defer unlock()
 	return readProjectManifest(root, projectID)
 }
 

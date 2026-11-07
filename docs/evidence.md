@@ -18,13 +18,17 @@
 
 | Trust | 含义 | 是否注入正文 |
 |---|---|---|
-| `user_decision` | 用户显式记录 | 是 |
-| `verified` | 已验收 artifact | 是，带版本/哈希/来源，正文用 `<<<EVIDENCE` 引号包裹 |
+| `user_confirmed` | 用户显式记录 | 是 |
+| `published` | 已进入 Project Manifest 的交付 artifact | 是，带版本/哈希/来源 |
+| `objective_accepted` | Objective 已完成但尚未发布 | 是，明确标记 not published |
+| `task_accepted` | Task 已验收，Objective 未完成 | 是，明确标记 task-level |
 | `in_progress` | 进行中 Objective | 否，仅状态行 |
 | `unverified` | 失败/未验证输出 | 否，仅状态行 |
 
 同一 Objective/路径只呈现最新版本；旧版本留在数据库，但不会被当作当前事实。
-跨 Project 的条目在 `Select` 阶段严格过滤。
+`BuildEvidenceIndex` 会读取已发布 Manifest：只有 Manifest 中哈希匹配的 artifact 才是
+`published`；completed 但未发布的标记 `objective_accepted`；active/failed Objective 的
+accepted Task 只能是 `task_accepted`。跨 Project 的条目在 `Select` 阶段严格过滤。
 
 ## 选择
 

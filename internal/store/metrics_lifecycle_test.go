@@ -355,3 +355,33 @@ func TestRequeueBlockedHonorsExistingAttemptAllowance(t *testing.T) {
 		t.Fatalf("task = %+v", task)
 	}
 }
+
+func TestConcurrentRequeueOnlyOneWins(t *testing.T) {
+	st := openMetricsStore(t)
+	createDraftObjective(t, st)
+	if err := st.CreateTask(domain.Task{ID: "T1", Validator: "ok", ObjectiveID: "obj-1", PlanVersion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := st.Claim("T1", "r1", "fake"); !ok {
+		t.Fatal("claim")
+	}
+	if _, err := st.SettleRun(Settlement{RunID: "r1", RunStatus: domain.RunFailed, Note: "verification: nope"}); err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan bool, 8)
+	for i := 0; i < 8; i++ {
+		go func() {
+			ok, _ := st.RequeueBlocked("T1", "recovery", 3)
+			results <- ok
+		}()
+	}
+	wins := 0
+	for i := 0; i < 8; i++ {
+		if <-results {
+			wins++
+		}
+	}
+	if wins != 1 {
+		t.Fatalf("requeue winners = %d, want 1", wins)
+	}
+}

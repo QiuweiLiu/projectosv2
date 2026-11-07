@@ -29,8 +29,10 @@ P2 可用性已完成并验证：
 - macOS 原生外壳（非 Electron），默认打开 `/chat`；
 - **P5**：可信共享产物 Manifest、结构化 Progress、有界自主恢复、按需 Evidence Context、
   Cockpit 恢复/证据展示、SSE 游标恢复与故障注入测试。
+- **P6**：Manifest 版本锁读取、Evidence 结构化预算与可信等级、DB/执行器故障注入、
+  长会话分页、Objective judge 交付文件 seeding、OpenCode/ProjectOS 单样本对照。
 
-281 项 Go 测试 + `-race` + `vet` 全绿。边界与未实现项见 `docs/api.md` 第 11 节和
+298 项 Go 测试 + `-race` + `vet` 全绿。边界与未实现项见 `docs/api.md` 第 11 节和
 `.project/HANDOFF.md`。
 
 ## 快速开始

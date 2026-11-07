@@ -2,8 +2,11 @@ package opencodeserver
 
 import (
 	"bufio"
+	"context"
+	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseModel(t *testing.T) {
@@ -28,5 +31,22 @@ func TestEventStreamSkipsHeartbeatAndSplitsEvents(t *testing.T) {
 	ev, err = stream.Next()
 	if err != nil || ev.Type != "session.text.ended" {
 		t.Fatalf("second event = %+v %v", ev, err)
+	}
+}
+
+func TestStartFailsWhenServerExitsBeforePassword(t *testing.T) {
+	bin := t.TempDir() + "/failing-opencode.sh"
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 9\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	start := time.Now()
+	_, err := Start(ctx, Config{Bin: bin, StartupTimeout: 300 * time.Millisecond})
+	if err == nil {
+		t.Fatal("server exit was reported as successful startup")
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Fatalf("startup failure took too long: %s", time.Since(start))
 	}
 }

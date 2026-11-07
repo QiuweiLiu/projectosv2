@@ -51,9 +51,10 @@ Manifest 完全从 Objective DB、`delivery.json` 和 evidence 重建；删除�
 
 ## 原子刷新与并发
 
-发布在 `project-state/<projectID>/.publish.lock` 上持有 `flock`，防止 goal runner 与
-serve 进程同时刷新同一 Project。文件先写入隔离 staging 目录，Manifest 写在树内，随后
-整目录替换；失败时保留上一版完整树。旧树只在成功替换后删除。
+发布在 `project-state/<projectID>/.publish.lock` 上持有独占 `flock`；seed 在读 Manifest
+和文件之前先持有共享 `flock`，因此不会把旧 Manifest 和新树文件组合。文件先写入隔离 staging 目录，Manifest 写在树内，随后
+整目录替换；失败时保留上一版完整树。旧树只在成功替换后删除。发布进程崩溃后，
+`recoverArtifactTree` 会恢复 `.artifacts-old-*` 的唯一完整备份，并清理 staging/old。
 
 ## Worker 可见副本
 

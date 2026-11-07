@@ -1,86 +1,46 @@
 # State
 
 ## Stage
-P5 完成：Metrics 生命周期/墙钟/分角色 token；共享产物 Manifest 与完成门禁；结构化
-Progress；有界自动恢复（retry/replan/approval/unknown 阻断）；按需 Evidence Context；
-Cockpit 恢复/证据展示；SSE 游标恢复。P3.5 磁盘满等极端故障仍未注入。
-Kernel 仍是唯一 Task/Run 权威；Recovery 只调用 Store 转换与现有 replanner。
+P6 可靠性加固进行中。P6.0（Manifest 并发读取、Evidence 预算/可信等级、文档）已完成；
+P6.1（DB/执行器/文件系统/并发故障注入）完成关键项；P6.2 完成长会话分页与事件保留验证；
+P6.3 完成 1 个真实 OpenCode/ProjectOS 对照样本，B/C 尚未运行。
+Kernel 仍是 Task/Run/Evidence/Review 唯一权威；没有第二套 Scheduler 或 Agent Loop。
 
 ## Verified
-- **281 项测试 + `-race` + `vet` 全绿**；真实运行后无残留进程。
-- **场景 A**：待办应用 3 任务，`node test.js` 验收，`out/` 组装后 11–14 项测试通过。
-- **场景 B**：sales.csv → summarize.js → summary.md，总额 60（一次通过，0 阻断）。
-- **场景 C**：真实模型重规划（T1 失败 → T1-fix → 完成）。
-- **场景 D**：SIGKILL CLI → Run unknown / Task blocked，不重复执行；复用幸存 daemon。
-- **L0/L1**：杀 `serve` 后任务继续并交付；`goal cancel` 14s 生效、0 残留；事件游标不重复。
-- **L2**：浏览器内完成 创建 → 计划 → 确认 → 执行 → 交付；执行中取消 → cancelled。
-- **第二轮审查 10 项**：权限、验收独立性、重复版本、交付符号链接、用量、失败会话、
-  预算、隔离持久化、完成写失败、取消竞争——全部修复。
-- **第三轮审查 5 项**：planner 权限、acceptance 结论按类型读取、quarantine 文件兜底、
-  完成写入顺序、陈旧取消标记——全部修复；quarantine 写库失败、快照写失败、
-  陈旧取消标记都有故障注入/集成测试。
-- **P2**：Workspace 双目标创建/切换/详情/汇报/事件；真实目标全流程；审批弹窗、
-  文本 diff、桌面 `--check`；token 为 provider 实测值。
-- **M0**：`runNow` 只生成计划，不再隐式确认/执行；Objective 级 acceptance 成为独立
-  完成门禁；删除旧代码生成的 query-string SQLite 残留并加忽略规则。
-- **M1/M2 真实聊天**：OpenCode 2.2.5 私有 v2 Server；Session 创建/续聊/prompt；
-  SSE `text.delta` 实时、最终文本落库；工具 `permission.asked` → UI 批准；重启后历史恢复；
-  聊天不产生 Objective。SSE 事件 `after`/`Last-Event-ID` 可重放。
-- **M3 最小**：Project catalog + objective 的 `project.json` 归属；聊天可按项目过滤；
-  项目级 `project-state/<id>/.project/` 快照（目标/成果/阻塞/决策），有 8KB 上限。
-- **P4 真实证据**：坏计划（未声明 `add_task`）被 CLI 拒绝并给出具体原因，好计划通过；
-  worker 在提示词含机器检查时生成 `app.py: def add_task`；待批准权限在 serve 重启后
-  被重新拉取；跨 Objective worker 读取共享 `notes.txt` 并写出 `report.txt`；notes 目标
-  `progress=done`、metrics 1 task/1 accepted/3 reviews/21481 prompt tokens；真实
-  Goal Draft 提取丢弃 “Do not use any other tools” 并保留用户约束。
-- **P4 重试边界**：provider 429/overloaded/ECONNRESET 最多 3 次有界退避；permanent
-  error 不重试。fake session 测试通过，真实 429 仍可能耗尽重试后 fail-closed。
-- 真实校验：`/chat` 浏览器发送、流式回复、工具权限、重启恢复；详见 HANDOFF。
-- **CLI 执行器**：`opencode-go/minimax-m3.1-flash` 与 `deepseek-v4.1-flash` 真实跑通 计划 → worker → reviewer →
-  acceptance → 交付；崩溃残留进程回收有回归测试。
-- **全量审查**：34 条（P0×3/P1×22/P2×9），已修 25，未修 9 见 Remaining。
-- 证据：`reports/`（p1-acceptance、p1-l0-l1、l2-cockpit、l2-friction、delivery-checks、
-  retry-and-artifacts、acceptance-and-reporter、outcome-and-continue、full-review-2026-11-04）。
+- **298 项 Go 测试 + `-race` + `vet` 全绿**；桌面 `--check` 通过。
+- **P6.0 Manifest**：seed 现在先取共享锁再读 Manifest，Manifest 与文件处于同一版本区间；
+  发布 crash 后恢复 `.artifacts-old`、清理 staging；`TestSeedReadsManifestAndFilesUnderOneVersionLock`
+  证明不会跨版本组合。
+- **P6.0 Evidence**：`RenderBounded` 在结构化 Bundle 上控制预算；不截断 UTF-8、不产生未闭合
+  EVIDENCE 块、超长条目降级为 provenance 摘要；转义恶意分隔符；长中文/Emoji/多决策/大历史测试通过。
+- **P6.0 可信等级**：`published` / `objective_accepted` / `task_accepted` / `user_confirmed` /
+  `in_progress` / `unverified`；只有 Manifest 哈希匹配的 artifact 标为 published，未完成
+  Objective 的 accepted Task 不会伪装成已交付成果。
+- **P6.0 文档**：recovery/artifacts/evidence/STATE/HANDOFF 与实际实现同步；可选
+  `--recovery-model` 已记录，不再标记未实现。
+- **P6.1 DB**：关闭 store 后 settle/review/completion 写失败均不产生虚假成功；重启后
+  interrupted Run 变 unknown/blocked；并发 requeue 只有 1 个赢家。
+- **P6.1 文件系统**：read-only DB/目录、snapshot/delivery/manifest 写失败、seed 哈希/符号链接/
+  路径逃逸、发布并发、crash 目录恢复均有测试；旧完整树在发布失败时保留。
+- **P6.1 执行器**：OpenCode CLI 非零退出显示 failed 及 stderr；Server 未打印密码即退出时
+  Start 失败且不残留；Objective judge 会话现在会收到交付文件，不再检查空目录。
+- **P6.2**：1200 条消息分页无丢失/重复（183 ms，SQLite 282,624 bytes）；事件保留 500/对话；
+  慢消费者 5000 事件 resync；发送/读取分页与恢复测试通过。
+- **P6.3 Task A**（n=1，deepseek-v4.1-flash）：baseline 140.1s / 6,583 input / 385 output，
+  hidden PASS；ProjectOS final 629.4s / 45,957 input / 1,024 output，hidden PASS，0 人工介入。
+  ProjectOS 多出 Planner + 2 Workers + 5 review/acceptance calls；这是成本负结果，不是
+  ProjectOS 优势证明。详见 `reports/p6-benchmark-2026-11-07.md`。
+- **P5 保留**：场景 A 自动恢复、B/C 真实 worker 读取共享产物、C 中断后人工恢复完成。
 
 ## Capabilities
-- **目标与计划**：objective 状态机、plan 版本（draft/confirmed/superseded）、Schema/DAG/路径校验；
-  一个任务恰好一个产物且全局唯一；planner 不接收宿主绝对路径。
-- **执行**：并行 DAG、依赖产物祖先闭包注入、命令验收 sandbox、预算/超时/quarantine。
-- **执行器**：默认 `opencode`（`opencode run --standalone --format json`，每任务独立目录；
-  有 git 仓库用 worktree，否则拷贝；进程组取消；pid 文件 + cwd 校验的崩溃清理；
-  worker `--auto`、审查/规划默认拒绝）。`--executor ao` 保留。
-- **模型**：按角色配置（规划/执行/审查/验收/汇报），存 `models.json`，界面下拉框可选；
-  解析顺序 flag > models.json > 内置默认；模型列表来自 `opencode --standalone models` 缓存
-  （见 `docs/models.md`）。
-- **验收三层**：Kernel 确定性检查 → reviewer（查缺陷，P0/P1 阻断）→ acceptance（查完成度）。
-- **失败处理**：有界重规划（1 次、≤5 新任务、已接受不可改、修复必须新 ID）；重试注入 findings。
-- **继续改进**：已交付目标可追加 ≤5 个新任务；已验收任务原样保留、不重跑。
-- **交付**：`out/` 组装 + 副本上重跑命令验收，失败即 failed；`delivery.md/json`、`.project` 快照。
-- **服务**：`serve --daemon/--stop/--status`、`serve.lock`、instance 身份校验、token 0600、默认回环；
-  Workspace 聚合 `projects/<id>` 多目标，每目标独立锁/预算/out，可并行。
-- **界面**：中文状态、汇报卡片、成果区、任务图、证据/审查、时间线、confirm/run/cancel、继续改进；
-  执行前审批弹窗（风险/命令/预算）、任务产物的文本 diff、多目标切换。
-- **恢复**：写打开独占 `kernel.lock` 并恢复；读命令只读打开，不触发恢复。
-- **P3.0**：Objective acceptance 缓存绑定完整 plan/ObjectiveAcceptance/所有产物完整内容哈希；
-  Conversation 消息使用 OpenCode `remote_id`，同文本不同消息保留；SSE 分页回放、慢消费者 resync。
-- **P3.1**：多轮聊天 → Goal Draft（来源消息/context version）→ 用户编辑确认 → Objective →
-  Planner 计划（仍需二次确认）。真实 notes 目标完成 handoff→执行→验收→交付。
-- **P3.2**：Project Context Builder 进入聊天首条消息与 Planner `--context`，包含已验证产物内容、
-  决策、活跃目标、阻塞；项目快照从目标库重建。
-- **P5 真实验证**：Metrics 空/计划/运行/失败/并发/完成 + token 分角色；共享产物未完成不发布、
-  `out` 篡改不被信任、哈希/路径/并发/旧树保护；场景 A 自动恢复（T1 失败→重试→T2 继续→交付）；
-  场景 B 三个同 Project Objective：A fake 结果 → B 真实 worker 读共享并写 `metric_b=42` →
-  C 真实 worker 汇总；场景 C kill -9 后 Run unknown，拒绝自动重试，人工批准后重排队完成。
-- **P2**：多目标 Workspace、执行前审批、文本 diff、`--session` 续跑、work 保留 20、token 实测优先、
-  macOS 原生外壳（WKWebView）。
-- **聊天**：Conversation SQLite、OpenCode v2 Session/SSE、工具 ask 审批、历史同步、Project 过滤。
+- Objective/Plan/Task/Run 状态机、DAG 并发、SQLite 单写者、事务性结算。
+- Planner/Worker/Reviewer/Acceptance/Reporter；Objective 级验收；有界重试/重规划/Recovery。
+- OpenCode CLI/Server；Conversation/SSE/工具审批；Goal Handoff；Project Context/Evidence。
+- 共享产物 Manifest + seed；Progress/Metrics；WKWebView Cockpit。
 
 ## Remaining
-- **命令验收不是沙箱**：允许列表只防注入，不防合法命令读全盘/联网（见 `docs/security.md`）。
-- 计划字段 `scope/inputs/allowed/forbidden/acceptance/priority` 不参与机器判定（`docs/plan-semantics.md`）。
-- 会话续跑只续对话上下文，不续工作目录；重试仍在新目录。
-- 聊天事件只保留最近 500 条/对话；`text_delta` 不持久化；消息历史无级联清理。
-- 托管任务仍是执行前审批，不是逐工具拦截；command 不是沙箱。
-- Recovery 诊断是确定性的，没有模型辅助诊断；unknown 只允许人工显式恢复。
-- 未做：Windows/Linux、逐工具审批、二进制行级 diff、日志轮转。
-- 未注入：磁盘满、只读挂载、运行中 SQLite 失效、OpenCode Server 退出重连。
+- **B/C benchmark 未运行**；Task A 只有 1 个样本，不能据此判断整体收益。
+- 磁盘满、只读挂载、SQLite WAL 损坏、OpenCode Server 退出重连未做现场注入。
+- Recovery 模型辅助诊断仅 fake backend 单元验证；真实模型质量未评估。
+- 命令验收不是沙箱；托管任务仍是执行前审批，不是逐工具拦截。
+- 聊天消息保留 1000、事件 500；Windows/Linux、日志轮转、桌面签名未做。

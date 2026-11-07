@@ -410,3 +410,96 @@ func TestPublishBindsObjectiveReviewToPlanVersion(t *testing.T) {
 		t.Fatalf("current-plan blocking review was ignored: %+v", manifest)
 	}
 }
+
+// A reader must not combine an old Manifest with files from a newer tree.
+// The test holds the publisher lock across a tree swap while seed starts.
+func TestSeedReadsManifestAndFilesUnderOneVersionLock(t *testing.T) {
+	root := t.TempDir()
+	ws := newWorkspace(root)
+	project, _ := ws.CreateProject("Concurrent")
+	completedObjective(t, root, project.ID, "obj-a", "a.txt", "v1", goal.StatusCompleted, goal.StatusCompleted)
+	publishForTest(t, root, project.ID)
+
+	seedDir := filepath.Join(root, "projects", "obj-b")
+	if err := os.MkdirAll(seedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeProjectMeta(seedDir, project.ID); err != nil {
+		t.Fatal(err)
+	}
+	state := projectStateDir(root, project.ID)
+	unlock, err := lockProjectPublish(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedErr := make(chan error, 1)
+	go func() { seedErr <- seedProjectArtifacts(seedDir) }()
+	time.Sleep(150 * time.Millisecond) // let an old reader load the v1 manifest first
+
+	staging, err := os.MkdirTemp(state, ".version-test-")
+	if err != nil {
+		unlock()
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(staging, "obj-a"), 0o755); err != nil {
+		unlock()
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staging, "obj-a", "a.txt"), []byte("v2"), 0o644); err != nil {
+		unlock()
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte("v2"))
+	manifest := ArtifactManifest{Version: artifactManifestVersion, ProjectID: project.ID,
+		GeneratedAt: time.Now().UTC(), Entries: []ArtifactEntry{{
+			ProjectID: project.ID, ObjectiveID: "obj-a", TaskID: "T1", ArtifactPath: "a.txt",
+			ContentSHA256: hex.EncodeToString(sum[:]), VerificationStatus: "verified",
+		}}}
+	raw, _ := json.Marshal(manifest)
+	if err := os.WriteFile(filepath.Join(staging, "MANIFEST.json"), raw, 0o644); err != nil {
+		unlock()
+		t.Fatal(err)
+	}
+	if err := swapArtifactTree(state, staging); err != nil {
+		unlock()
+		t.Fatal(err)
+	}
+	unlock()
+
+	if err := <-seedErr; err != nil {
+		t.Fatalf("seed crossed versions: %v", err)
+	}
+	rawFile, err := os.ReadFile(filepath.Join(seedDir, "repo", "project-artifacts", "obj-a", "a.txt"))
+	if err != nil || string(rawFile) != "v2" {
+		t.Fatalf("seed content = %q %v", rawFile, err)
+	}
+}
+
+func TestPublishRecoversCrashWindowAndCleansStaging(t *testing.T) {
+	root := t.TempDir()
+	ws := newWorkspace(root)
+	project, _ := ws.CreateProject("Crash")
+	completedObjective(t, root, project.ID, "obj-a", "a.txt", "safe", goal.StatusCompleted, goal.StatusCompleted)
+	publishForTest(t, root, project.ID)
+	state := projectStateDir(root, project.ID)
+	crashOld := filepath.Join(state, ".artifacts-old-crash")
+	if err := os.Rename(filepath.Join(state, "artifacts"), crashOld); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(state, ".artifacts-staging-crash"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := publishForTest(t, root, project.ID)
+	if len(manifest.Entries) != 1 {
+		t.Fatalf("entries = %+v", manifest.Entries)
+	}
+	if raw, err := os.ReadFile(filepath.Join(sharedArtifactDir(root, project.ID), "obj-a", "a.txt")); err != nil || string(raw) != "safe" {
+		t.Fatalf("tree = %q %v", raw, err)
+	}
+	entries, _ := os.ReadDir(state)
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".artifacts-") {
+			t.Fatalf("leftover crash directory: %s", entry.Name())
+		}
+	}
+}

@@ -99,6 +99,7 @@ func runSessionOnce(ctx context.Context, backend exec.Backend, req exec.ReviewRe
 		Key:          hex.EncodeToString(sum[:8]),
 		ApprovalMode: "default",
 		Prompt:       prompt,
+		Files:        req.SeedFiles,
 	})
 	if err != nil {
 		return engine.ReviewOutcome{Findings: failClosed(role+"_start", err)}, err

@@ -46,7 +46,8 @@ func (a *Acceptance) JudgeObjective(ctx context.Context, req engine.ObjectiveRev
 	artifact := exec.Artifact{Version: version, Result: objectiveEvidence(req), Files: sortedKeys(req.TaskResults)}
 	return runSession(ctx, a.backend, exec.ReviewRequest{
 		Task: task, Artifact: artifact, Kind: domain.ReviewObjective,
-		RunID: "objective:" + req.ObjectiveID + ":" + version,
+		RunID:     "objective:" + req.ObjectiveID + ":" + version,
+		SeedFiles: req.TaskResults,
 	}, "objective", objectivePrompt(req), a.Timeout, a.Poll)
 }
 

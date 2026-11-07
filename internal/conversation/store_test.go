@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -265,4 +266,64 @@ func TestContextVersionPersistsAndRefreshes(t *testing.T) {
 	if err != nil || len(list) != 1 || list[0].ContextVersion != "hash-2" {
 		t.Fatalf("list = %+v %v", list, err)
 	}
+}
+
+func TestLongConversationPagination(t *testing.T) {
+	started := time.Now()
+	dbPath := filepath.Join(t.TempDir(), "conversations.db")
+	st, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	c, err := st.Create("long", "", "", "/tmp/chat", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 1200; i++ {
+		if _, err := st.AppendMessage(c.ID, "user", "message-"+itoa(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[string]bool{}
+	before := ""
+	for page := 0; page < 20; page++ {
+		msgs, err := st.Messages(c.ID, 100, before)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) == 0 {
+			break
+		}
+		for _, msg := range msgs {
+			if seen[msg.ID] {
+				t.Fatalf("duplicate message on pagination: %s", msg.ID)
+			}
+			seen[msg.ID] = true
+		}
+		before = msgs[0].CreatedAt.Format(time.RFC3339Nano)
+		if len(msgs) < 100 {
+			break
+		}
+	}
+	if len(seen) != 1200 {
+		t.Fatalf("read %d of 1200 messages", len(seen))
+	}
+	if info, err := os.Stat(dbPath); err == nil {
+		t.Logf("messages=1200 elapsed_ms=%d db_bytes=%d", time.Since(started).Milliseconds(), info.Size())
+	}
+}
+
+func itoa(v int) string {
+	if v == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for v > 0 {
+		i--
+		buf[i] = byte('0' + v%10)
+		v /= 10
+	}
+	return string(buf[i:])
 }
