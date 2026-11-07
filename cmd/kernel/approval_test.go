@@ -28,9 +28,9 @@ func TestApprovalReasonsCoverRiskAndCommands(t *testing.T) {
 
 func TestRunArgsCarryApprovalAndBudget(t *testing.T) {
 	c := &controlServer{}
-	args := c.runArgs("/tmp/d", runRequest{Reviewer: true, ApproveRisk: true, MaxRuns: 3, MaxReviews: 4, MaxTokens: 500})
+	args := c.runArgs("/tmp/d", runRequest{Reviewer: true, ApproveRisk: true, MaxRuns: 3, MaxReviews: 4, MaxTokens: 500, Replan: true})
 	joined := strings.Join(args, " ")
-	for _, want := range []string{"--approve-risk", "--reviewer", "--max-runs 3", "--max-reviews 4", "--max-tokens 500"} {
+	for _, want := range []string{"--approve-risk", "--reviewer", "--max-runs 3", "--max-reviews 4", "--max-tokens 500", "--replan"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("args missing %q: %s", want, joined)
 		}

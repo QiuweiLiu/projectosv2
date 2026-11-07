@@ -71,6 +71,9 @@ func artifactManifestPath(root, projectID string) string {
 func publishProjectArtifacts(root, projectID string, projects []project) (ArtifactManifest, error) {
 	manifest := ArtifactManifest{Version: artifactManifestVersion, ProjectID: projectID,
 		GeneratedAt: time.Now().UTC(), Entries: []ArtifactEntry{}}
+	if err := cleanPathSegment(projectID); err != nil {
+		return manifest, fmt.Errorf("project id: %w", err)
+	}
 	state := projectStateDir(root, projectID)
 	if err := os.MkdirAll(state, 0o755); err != nil {
 		return manifest, fmt.Errorf("create project state: %w", err)
@@ -166,6 +169,7 @@ func publishableArtifacts(p project, staging string, total *int64, seen map[stri
 	}
 	var report struct {
 		Status string `json:"status"`
+		Plan   int    `json:"planVersion"`
 		Checks []struct {
 			OK bool `json:"ok"`
 		} `json:"checks"`
@@ -175,6 +179,9 @@ func publishableArtifacts(p project, staging string, total *int64, seen map[stri
 	}
 	if report.Status != string(goal.StatusCompleted) {
 		return nil, "delivery.json status is " + report.Status, nil
+	}
+	if report.Plan != 0 && report.Plan != p.Obj.PlanVersion {
+		return nil, "delivery.json belongs to another plan version", nil
 	}
 	for _, check := range report.Checks {
 		if !check.OK {
@@ -358,6 +365,9 @@ func seedProjectArtifacts(dir string) error {
 	}
 	if json.Unmarshal(raw, &meta) != nil || strings.TrimSpace(meta.ID) == "" {
 		return nil
+	}
+	if err := cleanPathSegment(meta.ID); err != nil {
+		return fmt.Errorf("project id: %w", err)
 	}
 	root := dir
 	parent := filepath.Dir(dir)

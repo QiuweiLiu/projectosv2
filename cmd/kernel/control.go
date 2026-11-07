@@ -212,6 +212,7 @@ type runRequest struct {
 	MaxReviews  int    `json:"maxReviews"`
 	MaxTokens   int    `json:"maxTokens"`
 	RunTimeout  string `json:"runTimeout"`
+	Replan      bool   `json:"replan"`
 }
 
 func (c *controlServer) runArgs(dir string, req runRequest) []string {
@@ -236,6 +237,9 @@ func (c *controlServer) runArgs(dir string, req runRequest) []string {
 	}
 	if strings.TrimSpace(req.RunTimeout) != "" {
 		args = append(args, "--run-timeout", req.RunTimeout)
+	}
+	if req.Replan {
+		args = append(args, "--replan")
 	}
 	return args
 }

@@ -33,7 +33,7 @@
 - 用户决策始终最高优先级；
 - verified artifact 优先于 in_progress/unverified；
 - 同分按更新时间倒序；
-- 预算默认 4096 字符，超出时保留高相关条目并标记 truncation。
+- 预算默认 4096 字符；最终渲染有硬上限，不会在未闭合的 `<<<EVIDENCE` 块中间截断。
 
 聊天首条消息与 Planner `--context` 使用同一逻辑，查询分别为用户当前消息和 Objective Goal。
 

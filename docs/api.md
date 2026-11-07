@@ -46,7 +46,7 @@ kernel serve --dir D --stop                 # 停掉 HTTP 服务
 |---|---|---|
 | POST | `/api/goals` | `{goal,title,projectId,runNow}`；`runNow` 只生成计划，**不会**确认或执行 |
 | POST | `/api/objectives/{id}/confirm` | 确认当前草案计划 |
-| POST | `/api/objectives/{id}/run` | `{reviewer,approveRisk,maxRuns,maxReviews,maxTokens,runTimeout}`；高风险任务或命令校验需要 `approveRisk=true` |
+| POST | `/api/objectives/{id}/run` | `{reviewer,approveRisk,maxRuns,maxReviews,maxTokens,runTimeout,replan}`；高风险任务或命令校验需要 `approveRisk=true` |
 | POST | `/api/objectives/{id}/cancel` | `{reason}`，协作式取消 |
 | POST | `/api/objectives/{id}/pause` | 请求调度器暂停启动新任务；当前 Run 会继续完成 |
 | POST | `/api/objectives/{id}/unpause` | 移除暂停标记，调度器继续 |

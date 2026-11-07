@@ -238,6 +238,7 @@ details[open] summary::before{content:"▾ "}
           <div id="recoveryBody" class="hint">—</div>
           <div class="row" id="recoveryActions" style="margin-top:.5rem;display:none">
             <button class="btn primary" id="btnRecover">重新排队</button>
+            <button class="btn primary" id="btnReplan" style="display:none">重新规划并继续</button>
             <span class="hint" id="recoveryHint"></span>
           </div>
         </div>
@@ -341,7 +342,7 @@ const ROLES = [
   ['acceptance', '验收'], ['reporter', '汇报'],
 ];
 
-const state = { control:false, objectives:[], id:null, detail:null, task:null, events:[], pending:false, report:null, reportAsked:{}, progress:null };
+const state = { control:false, objectives:[], id:null, detail:null, task:null, events:[], pending:false, report:null, reportAsked:{}, progress:null, replanNext:false };
 let detailGen = 0, taskGen = 0;
 
 function token(){ return $('token').value.trim() || localStorage.getItem('kernelToken') || ''; }
@@ -630,11 +631,15 @@ async function loadRecovery(){
   ];
   if (f.evidence && f.evidence.length) lines.push('证据：' + f.evidence.filter(Boolean).slice(0, 3).join(' / '));
   body.innerHTML = lines.map(x => '<div>' + esc(clip(x, 220)) + '</div>').join('');
-  const show = state.control && ((r.state === 'recoverable_failure' && f.action === 'retry' && r.recoveryAvailable) || (r.state === 'needs_approval' && f.action === 'approve'));
-  actions.style.display = show ? '' : 'none';
-  btn.disabled = !show || state.pending;
+  const showRetry = state.control && ((r.state === 'recoverable_failure' && f.action === 'retry' && r.recoveryAvailable) || (r.state === 'needs_approval' && f.action === 'approve'));
+  const showReplan = state.control && r.state === 'blocked' && f.action === 'replan';
+  actions.style.display = (showRetry || showReplan) ? '' : 'none';
+  btn.style.display = showRetry ? '' : 'none';
+  $('btnReplan').style.display = showReplan ? '' : 'none';
+  btn.disabled = !showRetry || state.pending;
+  $('btnReplan').disabled = !showReplan || state.pending;
   btn.textContent = f.requiresApproval ? '批准并重新排队' : '重新排队';
-  $('recoveryHint').textContent = show ? '重新排队只恢复该任务，已验收成果不会被重跑。' : '';
+  $('recoveryHint').textContent = showReplan ? '按现有计划做一次有界重规划。' : (showRetry ? '重新排队只恢复该任务，已验收成果不会被重跑。' : '');
 }
 
 $('btnRecover').onclick = async () => {
@@ -857,7 +862,8 @@ async function act(path, body){
 
 $('btnPlan').onclick = () => act('/api/objectives/' + encodeURIComponent(state.id) + '/plan');
 $('btnConfirm').onclick = () => act('/api/objectives/' + encodeURIComponent(state.id) + '/confirm');
-$('btnRun').onclick = () => openApproval();
+$('btnRun').onclick = () => { state.replanNext = false; openApproval(); };
+$('btnReplan').onclick = () => { state.replanNext = true; openApproval(); };
 $('btnPause').onclick = () => act('/api/objectives/' + encodeURIComponent(state.id) + '/pause');
 $('btnResume').onclick = () => act('/api/objectives/' + encodeURIComponent(state.id) + '/unpause');
 $('approvalCancel').onclick = () => $('approval').classList.add('hidden');
@@ -892,8 +898,10 @@ async function submitApproval(){
     approveRisk: true,
     maxRuns: Number($('maxRuns').value) || 8,
     maxReviews: Number($('maxReviews').value) || 8,
-    maxTokens: Number($('maxTokens').value) || 600000
+    maxTokens: Number($('maxTokens').value) || 600000,
+    replan: !!state.replanNext
   });
+  state.replanNext = false;
 }
 $('btnCancel').onclick = () => {
   if (!confirm('确定取消这个目标？已通过的任务会保留，没完成的会停下。')) return;
