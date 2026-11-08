@@ -383,14 +383,14 @@ func serveForeground(dir, addr string, control bool) int {
 	}
 	defer cstore.Close()
 	settings := modelcfg.Load(dir)
-	defaultModel := settings.Chat
-	if defaultModel == "" {
-		defaultModel = settings.Worker
+	chatModel := settings.Chat
+	if chatModel == "" {
+		chatModel = settings.Worker
 	}
-	if defaultModel == "" {
-		defaultModel = "deepseek/deepseek-flash"
+	if chatModel == "" {
+		chatModel = defaultModel
 	}
-	chatMgr := chat.New(chat.Config{Bin: os.Getenv("OPENCODE_BIN"), Root: dir, DefaultModel: defaultModel,
+	chatMgr := chat.New(chat.Config{Bin: os.Getenv("OPENCODE_BIN"), Root: dir, DefaultModel: chatModel,
 		ProjectContext: ws.ProjectContextFor}, cstore)
 	defer chatMgr.Close()
 	mux, ctl, err := buildMux(ws, control, chatMgr)

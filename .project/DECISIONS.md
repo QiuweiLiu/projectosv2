@@ -333,3 +333,10 @@
 - work/ 默认保留最新 20 个尝试目录；`goal prune --keep N` 可调，运行中的目录跳过。
 - token 读取 `step_finish.part.tokens` 实测值；旧格式/后端缺失时才用 chars/4 并标注估算。
 - macOS 外壳用 Objective-C + WKWebView，不用 Electron；退出只停自己启动的 HTTP 客户端。
+
+## 2026-11-08 — K-D053：默认模型切到 opencode-go/deepseek-v4.1-flash（临时）
+- 用户要求“暂时把所有模型都默认为 opencode-go 里的 ds flash”；全部角色（planner/worker/
+  reviewer/acceptance/reporter/chat）共用 `cmd/kernel/goal.go` 的 `defaultModel` 单点。
+- 旧默认 `deepseek/deepseek-flash` 在当前 v2 provider 未注册，导致未配置 models.json 时计划失败。
+- 回退方式：改 `defaultModel` 一处，或在工作区 `models.json` 按角色覆盖；不改 CLI 与 API 契约。
+- 验证：新增 `TestDefaultModelAppliesToEveryRole`，逐角色断言回退值。

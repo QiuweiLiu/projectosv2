@@ -12,7 +12,8 @@ Kernel --model=<provider/model> → AO session → OpenCode harness → provider
 
 ## 当前默认
 
-所有角色默认 `deepseek/deepseek-flash`：
+所有角色默认 `opencode-go/deepseek-v4.1-flash`（2026-11-08 起；此前为
+`deepseek/deepseek-flash`）：
 
 | 角色 | 参数 |
 |---|---|
@@ -84,7 +85,9 @@ kernel goal models --dir D --refresh      # 从 opencode 拉取模型列表并�
 kernel goal models --dir D                # 查看当前设置
 ```
 
-解析顺序：**命令行参数 > `models.json` > 内置默认（deepseek/deepseek-flash）**。
+解析顺序：**命令行参数 > `models.json` > 内置默认（`opencode-go/deepseek-v4.1-flash`）**。
+
+内置默认由 `cmd/kernel/goal.go` 的 `defaultModel` 单点定义；改默认只改这一处。
 reviewer / acceptance 没单独设置时跟随 worker。
 
 界面上有「模型」卡片，五个角色各一个下拉框（规划/执行/审查/验收/汇报），

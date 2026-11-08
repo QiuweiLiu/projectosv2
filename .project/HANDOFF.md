@@ -1,57 +1,58 @@
 # Handoff
-Status: p6（可靠性/故障注入/长会话/首个对照样本）
+Status: p6 + 蓝白工作台真机验收
 
 ## Goal
 在 Go Kernel 上提供长期、多目标、可恢复的 AI 科研/工程工作台；Kernel 是 Task/Run/
 Evidence/Review 唯一权威，模型只提案，人在关键处确认。
 
 ## Done
-- **P6.0**：Manifest 读取在共享锁内完成；发布 crash 窗口恢复并清理 staging/old；
-  Evidence 在结构化 Bundle 层限预算、UTF-8 安全、无未闭合块；可信等级拆为
-  published/objective_accepted/task_accepted/user_confirmed/in_progress/unverified；
-  文档与实现同步。
-- **P6.1**：DB 关闭/写失败不产生虚假 success；并发 requeue 单赢家；发布 read-only/
-  manifest 失败保留旧树；seed 哈希、符号链接、路径逃逸拒绝；CLI 非零退出为 failed；
-  Server 启动失败不残留；Objective judge 会话接收交付文件。
-- **P6.2**：1200 条消息分页无丢失/重复；事件 500/对话；慢消费者 resync 测试。
-- **P6.3**：Task A 真实对照完成；发现并修复两个真实缺陷（worker 缺依赖文件、
-  Objective judge 空目录），最终 ProjectOS hidden PASS。
-- **桌面蓝白工作台（未提交）**：`chat.html` 新增 `modern-blue-workspace` 覆盖层实现蓝白
-  Design System（蓝白 Token、系统字体、三栏 260px+流式+312px 可折叠 Inspector、
-  概览|任务|审批|证据 Tab、纯文字导航）；修复 grid 高度失控（Composer/页脚首屏可见）、
-  模型名重复、工具状态对齐、窄窗换行；`ui.html` 同步换肤；`docs/desktop.md` 改蓝白。
-  无 dead 导航、无新增 API、无虚构按钮；Token 为 password 字段+掩码。
-- P5 仍有效：自动恢复、共享 Manifest、Evidence Context、Cockpit 恢复面板。
+- **P6.0–P6.3**：Manifest 版本锁、Evidence 预算/等级、故障注入、分页、Task A 对照
+  （见 `reports/p6-benchmark-2026-11-07.md`）。
+- **蓝白工作台**：`chat.html` 蓝白 Token/系统字体/三栏（260+流式+312 可折叠）/四 Tab；
+  `ui.html` 同步换肤；`docs/desktop.md` 改蓝白。
+- **本轮真机验收修复**：
+  - 流式去重键导致第二轮起不再逐字显示（`addMessage` 空文本占位）；
+  - 会话状态显示英文/绿色（`interrupted`）→ `convLabel/convBadge`；
+  - 回复 Markdown 原样输出 → 轻量转义后渲染粗体/代码/列表/链接；
+  - 空工作区无欢迎态、无会话仍可发送 → `renderEmptyState` + 发送禁用；
+  - 项目切换后仍显示他项目会话 → 关闭会话、保留草稿并提示；
+  - 断线只改页脚 → 顶部“连接中断”、禁用发送、重连后自动补偿；
+  - `/#goal=<id>` 深链被首个目标覆盖（`loadObjectives` 抢先改写 hash）；
+  - Inspector 证据 Tab 原为静态说明 → 真实 sharedArtifacts/delivery/Findings；
+  - 已处理审批刷新后仍显示“待处理” → `permission_replied` 复位；
+  - 任务标题常显；IME 回车误发送；会话行不可键盘访问。
 
 ## Verified
-- 24 包测试（`-count=1`）+ `-race` + `vet` 全绿；桌面 `--check`、`node --check`、
+- 24 包 `go test -count=1`、`-race`、`vet` 全绿；`desktop --check`、`node --check`、
   `git diff --check` 通过。
-- Headless 浏览器验证：`/tmp/ui-blue-final.png`（1440 认证，Composer/页脚/审批卡片正常）、
-  `/tmp/ui-blue-chat2.png`（空状态）、窄窗右栏隐藏。Cockpit `/` headless 挂起，以 DOM+构建代替。
-- 基线 HEAD：`c218d0e`；P6 `ecf8707`；工作区 `fda956e`；UI `16808a4` 已 push。
-- P6.0/P6.1：`TestSeedReadsManifestAndFilesUnderOneVersionLock`、`TestRenderBounded*`、
-  `TestPublishRecoversCrashWindow...`、`TestClosedStore*`、`TestConcurrentRequeue...`、
-  `TestObjectiveJudgeSeedsDeliveredFiles`、`TestExecutorExitIsFailureNotSuccess`。
-- P6.2：1200 消息 183 ms / SQLite 282,624 bytes；慢消费者与事件页测试通过。
-- P6.3 Task A（n=1）：baseline 140.1 s / 6,583+385 tokens；ProjectOS 629.4 s /
-  45,957+1,024 tokens；两者 hidden PASS；0 人工介入。ProjectOS 成本显著更高，
-  详见 `reports/p6-benchmark-2026-11-07.md`。
-- 基线 HEAD：`c218d0e`；P6 提交 `ecf8707`；桌面工作区选择 `fda956e`；UI 重构 `16808a4`，已 push 到 `origin/main`。
+- `OPENCODE_BIN` 实测：PATH 仍为 v1.18.15，仅设该变量即可规划（12,922 in / 185 out）。
+- 默认模型实测：空工作区无 models.json，日志 `planner model: opencode-go/deepseek-v4.1-flash`，
+  生成 1 个任务。
+- 审批闭环：新会话 → write 触发 `permission` → 允许一次 → 卡片消失、工具完成、
+  `approve-check.txt` 落盘、回 idle（`state-C2-*.png`）。
+- 流式：第 2 轮起出现 `.bubble.streaming`、状态“回复中”，结束回“空闲”并渲染 Markdown。
+- Handoff：草稿可编辑并确认 → 建 Objective + 计划；计划失败错误留在弹窗，不误报成功。
+- Cockpit：计划→确认→执行前审批弹窗（未真正执行）；失败目标显示 Recovery 与预算；
+  完成目标显示 1/1 与共享证据 Manifest。
+- 断线/重连：停 serve → “连接中断”+发送禁用；重启 → 自动重连并 resync。
+- 项目切换：会话列表按项目过滤、草稿保留、上下文更新。
+- 截图：`/tmp/state-A-empty2.png`、`final-B-conversation2.png`、`state-C2-pending|approved.png`、
+  `state-D-draft.png`、`state-E-rungate.png`、`state-F|G|H-*.png`。
 
 ## Open
-- 蓝白升级尚未完整验收：A–H 状态、真实 API 交互、项目切换、Inspector 内容及六种截图未全面验证；不能视为完整交付。独立 reviewer 鉴权过期。
-- Benchmark 只跑 Task A 一个样本；B/C 未运行，不能断言整体收益。
-- 未注入：磁盘满、只读挂载、SQLite WAL 损坏、OpenCode Server 退出重连。
-- Recovery 模型辅助诊断仅 fake backend 单测；未知执行状态仍需人工 `--task`。
-- 命令验收不是沙箱；托管任务不是逐工具审批；聊天消息保留 1000、事件 500。
+- 未点击：拒绝/总是允许、继续改进、暂停/取消、Recovery（避免再执行与花费）。
+- 环境：PATH 上 `opencode` 仍为 v1.18.15；已修 `goal.go` 让 planner/worker/reviewer/
+  acceptance 全部使用 `OPENCODE_BIN`（新增回归测试）。仅设置该变量即可规划，无需改 PATH。
+- 默认模型已统一为 `opencode-go/deepseek-v4.1-flash`（全部角色，单点 `defaultModel`）。
+- 独立 `reviewer` 子代理鉴权过期，未执行独立评审；auditor 只读核对已完成。
+- 蓝白升级尚未在 WKWebView 真窗口截图；Cockpit headless 截图曾挂起，改用 CDP。
+- P6 Task B/C 未跑；磁盘满/只读/WAL/Server 退出注入未做。
 
 ## Active
-工作副本：`~/dev/projectosv2`（蓝白 UI 三文件未提交：`cmd/kernel/chat.html`、`cmd/kernel/ui.html`、
-`docs/desktop.md`；另有本轮更新的 `.project/HANDOFF.md` 未提交）。
-测试服务已停止；无 daemon 进程。独立 `reviewer` 子代理因鉴权过期未能执行（已向用户报告，
-待用户选择替代路线）；审计为 auditor 只读核对（CONDITIONAL→4 项已修）。
+工作副本 `~/dev/projectosv2`，未提交 `chat.html`/`ui.html`/`goal.go`/新增测试/控制面。
+服务已停止；`/private/tmp/projectos-chat-012346` 留有测试会话与已取消目标。
 
 ## Next
-1. 跑 Task B/C 真实对照，扩大样本；先记录基准与预算。
-2. 根据 Task A 负结果评估低风险任务的 review/acceptance 条件化，不牺牲验收可靠性。
-3. 补磁盘满/只读挂载/WAL/Server 退出重连故障注入。
+1. 用户确认后提交并推送本轮 UI 验收、`OPENCODE_BIN` 与默认模型修改。
+2. 补点击类验证（拒绝/总是允许、继续改进、暂停/取消、Recovery）。
+3. 跑 Task B/C 与剩余故障注入。

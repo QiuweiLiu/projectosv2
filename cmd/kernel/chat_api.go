@@ -130,7 +130,7 @@ func defaultChatModel(root string) string {
 	if s.Worker != "" {
 		return s.Worker
 	}
-	return "deepseek/deepseek-flash"
+	return defaultModel
 }
 
 func chatGet(w http.ResponseWriter, r *http.Request, mgr *chat.Manager, id string) {

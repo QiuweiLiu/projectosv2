@@ -67,6 +67,15 @@
   .msg .bubble.streaming::after{content:"▍";color:var(--accent);animation:blink 1s steps(2) infinite}
   @keyframes blink{50%{opacity:0}}
   .msg .bubble.error{border-color:#e3c2bd;background:#fbf0ee;color:var(--bad)}
+  .msg .bubble pre.code{margin:10px 0;padding:10px 12px;background:#0F172A;color:#E2E8F0;border-radius:8px;overflow:auto;font:11.5px/1.6 var(--mono);white-space:pre}
+  .msg .bubble pre.code code{background:transparent;color:inherit;padding:0}
+  .msg .bubble code{background:#F1F5FB;border:1px solid var(--line);border-radius:4px;padding:1px 4px;font:12px/1.5 var(--mono)}
+  .msg .bubble ul,.msg .bubble ol{margin:8px 0;padding-left:20px}
+  .msg .bubble li{margin:3px 0}
+  .msg .bubble h3,.msg .bubble h4,.msg .bubble h5,.msg .bubble h6{margin:12px 0 6px;font-size:14px;font-weight:600;line-height:1.5}
+  .msg .bubble strong{font-weight:600}
+  .msg .bubble a{color:var(--accent);text-decoration:none}
+  .msg .bubble a:hover{text-decoration:underline}
   .tools{max-width:780px;margin:-6px auto 14px 34px;display:flex;flex-direction:column;gap:8px}
   .tool{border:0;border-left:2px solid var(--line-strong);background:transparent!important;box-shadow:none;border-radius:0;padding:5px 0 5px 10px;font-size:11.5px;max-width:780px;margin:0 auto 8px 34px}
   .tool .th{display:flex;justify-content:space-between;gap:10px;color:var(--muted)}
@@ -133,9 +142,18 @@
   .app>aside,.app>main{min-height:0}.side-scroll,.messages,.right{min-height:0;overflow:auto}.side-foot,.composer,.top{flex:none}.top .meta #modelLabel{display:none}
   .top select,.composer select{background:#fff;border-color:var(--line);border-radius:8px;color:var(--text)}
   .btn{background:#fff;border-color:var(--line-strong);border-radius:8px;color:var(--text);transition:background .16s,border-color .16s,color .16s}.btn:hover{background:var(--panel-soft);border-color:#B9C7DA}.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}.btn.primary:hover{background:var(--accent-strong)}
-  .btn.danger{color:var(--bad);border-color:#F2C6C6}.badge{border-color:var(--line);color:var(--muted);border-radius:999px}.badge.running{color:var(--accent-strong);border-color:#BFD2FF;background:var(--accent-soft)}.badge.error{color:var(--bad);border-color:#F2C6C6;background:#FEF2F2}.badge.ok{color:var(--ok);border-color:#B7E4C2;background:#F0FDF4}
+  .btn.danger{color:var(--bad);border-color:#F2C6C6}.badge{border-color:var(--line);color:var(--muted);border-radius:999px}.badge.running{color:var(--accent-strong);border-color:#BFD2FF;background:var(--accent-soft)}.badge.error{color:var(--bad);border-color:#F2C6C6;background:#FEF2F2}.badge.ok,.badge.idle{color:#475467;border-color:var(--line);background:#F8FAFD}.badge.warn{color:#B45309;border-color:#F5D7A7;background:#FFFBEB}
   .messages{padding:30px 24px 20px;scrollbar-color:#C7D2E2 transparent}.empty{font-size:13px;color:var(--muted)}
-  .msg{max-width:820px;margin-bottom:20px}.msg .who{width:26px;height:26px;border-radius:8px;background:#EEF2F7;color:var(--muted)}.msg.user .who{background:var(--accent);color:#fff}.msg .bubble{border-color:var(--line);border-radius:12px;font-size:14px;line-height:1.75;box-shadow:0 1px 2px rgba(16,24,40,.03)}.msg.user .bubble{background:#F1F5FB;border-color:#DCE6F5}.msg .bubble.streaming::after{color:var(--accent)}
+  .welcome{max-width:440px;margin:0 auto;padding:56px 20px;text-align:center;color:var(--muted)}
+  .welcome-mark{display:flex;gap:4px;justify-content:center;margin-bottom:20px}
+  .welcome-mark span{width:10px;height:10px;border-radius:3px;background:var(--accent);opacity:.25}
+  .welcome-mark span:nth-child(2){opacity:.55}
+  .welcome-mark span:nth-child(3){opacity:.9}
+  .welcome h2{font-size:19px;font-weight:600;color:var(--text);margin:0 0 10px;letter-spacing:-.01em}
+  .welcome p{font-size:13px;line-height:1.75;margin:0 0 20px}
+  .welcome-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:18px}
+  .welcome-note{font-size:12px;color:var(--faint);line-height:1.7}
+  .msg{max-width:820px;margin-bottom:20px}.msg .who{width:26px;height:26px;border-radius:8px;background:#EEF2F7;color:var(--muted)}.msg.user .who{background:var(--accent);color:#fff}.msg .bubble{border-color:var(--line);border-radius:12px;font-size:14px;line-height:1.75;box-shadow:0 1px 2px rgba(16,24,40,.03)}.msg.assistant .bubble{background:transparent;border:0;box-shadow:none;padding:2px 0}.msg.user .bubble{background:#F1F5FB;border-color:#DCE6F5}.msg .bubble.streaming::after{color:var(--accent)}
   .tools{max-width:820px}.tool{border-left-color:#C7D2E2;color:var(--muted)}.tool .th{justify-content:flex-start;align-items:baseline}.tool .th .right{display:inline;flex:0 0 auto;min-width:0;margin:0;padding:0;border:0;background:transparent;overflow:visible;color:var(--muted)}.permission{max-width:820px;border:1px solid #F5D7A7;border-left:3px solid var(--warn);border-radius:10px;background:#FFFBEB;padding:11px 13px}.permission b{color:#A15C00}
   .composer{flex:none;padding:14px 24px 18px;background:var(--bg);border-top:1px solid var(--line)}.composer .box{max-width:860px;border-color:var(--line-strong);border-radius:12px;box-shadow:0 2px 8px rgba(16,24,40,.04)}.composer .box:focus-within{border-color:#8DB1FF;box-shadow:0 0 0 3px var(--accent-soft)}.composer textarea{font-size:14px}.composer .below{max-width:860px;color:var(--muted)}
   .right{background:#fff;border-left:1px solid var(--line);padding:18px 16px;scrollbar-color:#C7D2E2 transparent}.right h2{font-size:12px;color:var(--muted);letter-spacing:.02em}.right .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:12px;box-shadow:0 1px 2px rgba(16,24,40,.03)}.right .task{border-top-color:var(--line)}.right .hint{font-size:11.5px;color:var(--muted)}.link{color:var(--accent)}
@@ -230,13 +248,9 @@
      <div class="card inspector-card" data-panel="tasks" id="tasks"><div class="hint">关联目标后显示任务。</div></div>
      <div class="card inspector-card" data-panel="approvals" id="approvalInspector"><div class="hint">当前没有待处理审批。</div></div>
      <h2 data-section="evidence">证据</h2>
-     <div class="card inspector-card" data-panel="evidence">
-       <div class="hint">
-        聊天使用 OpenCode v2 Server 的真实 Session；回复通过 SSE 流式更新。<br><br>
-        工具调用默认 <b>ask</b>：编辑文件、执行命令会在这里弹出批准卡片。<br><br>
-        关闭窗口不会停止已托管的任务；聊天本身也不会写入 Task 状态。
-      </div>
-    </div>
+     <div class="card inspector-card" data-panel="evidence" id="evidenceCard">
+       <div class="hint">关联目标后显示交付产物与共享证据。</div>
+     </div>
   </aside>
 </div>
 
@@ -272,7 +286,7 @@ function setInspectorTab(name){
     card.classList.toggle('active', card.dataset.panel === name);
     card.classList.toggle('inactive', card.dataset.panel !== name);
   });
-  document.querySelectorAll('[data-section]').forEach(h => h.classList.toggle('hidden', h.dataset.section !== name && h.dataset.section !== 'tasks'));
+  document.querySelectorAll('[data-section]').forEach(h => h.classList.toggle('hidden', h.dataset.section !== name));
 }
 document.querySelectorAll('.inspector-tabs [data-tab]').forEach(b => b.onclick = () => setInspectorTab(b.dataset.tab));
 setInspectorTab('overview');
@@ -330,13 +344,31 @@ async function loadProjects(){
   sel.innerHTML = state.projects.map(p => '<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join('');
   await loadProjectPanel(sel.value);
 }
-$('projSel').onchange = () => { loadObjectives(); loadProjectPanel($('projSel').value); };
+$('projSel').onchange = () => {
+  const pid = $('projSel').value;
+  loadObjectives(); loadConvs(); loadProjectPanel(pid);
+  // Switching project changes context: close a conversation that belongs to
+  // another project instead of showing it under the wrong project header.
+  if(state.conv && state.conv.projectId && state.conv.projectId !== pid){
+    if(state.stream){ state.stream.abort(); state.stream = null; }
+    state.conv = null; state.detail = null; state.streaming = null; state.rendered.clear();
+    $('title').textContent = '新对话';
+    $('status').textContent = '空闲'; $('status').className = 'badge idle';
+    $('stopBtn').disabled = true; $('toGoalBtn').disabled = true;
+    $('objSel').value = ''; $('objLabel').textContent = '';
+    $('objCard').innerHTML = '<div class="hint">未关联 Objective。</div>';
+    $('tasks').innerHTML = '<div class="hint">关联目标后显示任务。</div>';
+    renderEmptyState();
+    $('hint').textContent = '已切换项目；草稿已保留，点“＋ 新对话”后可发送';
+  }
+};
 
 async function loadProjectPanel(projectId){
   if(!projectId){ $('projectCard').innerHTML = '<div class="hint">未选择项目。</div>'; return; }
   try {
     const d = await api('/api/projects/'+encodeURIComponent(projectId));
     const s = d.snapshot || {};
+    state.projectSnapshot = s;
     const objs = s.objectives || [];
     const verified = s.verified || [];
     const blockers = s.blockers || [];
@@ -351,6 +383,7 @@ async function loadProjectPanel(projectId){
     if(decisions.length) html += '<div class="hint" style="margin-top:6px">决策：'+esc(clip(decisions[decisions.length-1], 100))+'</div>';
     html += '<div class="hint" style="margin-top:7px">来自 project-state 的派生快照，不是手写日志。</div>';
     $('projectCard').innerHTML = html;
+    if(!state.detail || !state.detail.conversation.objectiveId) renderEvidence(null);
   } catch(e) { $('projectCard').innerHTML = '<div class="hint">'+esc(e.message)+'</div>'; }
 }
 
@@ -364,6 +397,8 @@ async function loadObjectives(){
   if(state.detail && state.detail.conversation.objectiveId) sel.value = state.detail.conversation.objectiveId;
 }
 function statusLabel(s){ return ({draft:'草稿',planned:'待确认',active:'执行中',completed:'已完成',failed:'失败',cancelled:'已取消'})[s] || s; }
+function convLabel(s){ return ({idle:'空闲',running:'回复中',error:'发生错误',interrupted:'已中断'})[s] || s || '空闲'; }
+function convBadge(s){ return ({running:'running',error:'error',interrupted:'warn',idle:'idle'})[s] || ''; }
 $('objSel').onchange = () => { if(state.detail) { $('objLabel').textContent = $('objSel').selectedOptions[0]?.textContent || ''; } };
 
 async function loadConvs(){
@@ -371,13 +406,18 @@ async function loadConvs(){
     $('convs').innerHTML = '<div class="hint" style="padding:6px">'+esc(e.message)+'</div>'; return;
   }
   const box = $('convs');
-  if(!state.convs.length){ box.innerHTML = '<div class="hint" style="padding:6px">还没有对话。点“新对话”开始。</div>'; return; }
-  box.innerHTML = state.convs.map(c => {
+  const project = $('projSel') ? $('projSel').value : '';
+  const list = project ? state.convs.filter(c => !c.projectId || c.projectId === project) : state.convs;
+  if(!list.length){ box.innerHTML = '<div class="hint" style="padding:6px">当前项目还没有对话。点“新对话”开始。</div>'; return; }
+  box.innerHTML = list.map(c => {
     const on = state.conv && state.conv.id === c.id ? ' on' : '';
-    return '<div class="conv'+on+'" data-id="'+esc(c.id)+'"><div class="t">'+esc(c.title || '新对话')+'</div>' +
-      '<div class="p">'+esc(clip(c.lastMessage || statusLabel(c.status), 60))+'</div></div>';
+    return '<div class="conv'+on+'" data-id="'+esc(c.id)+'" role="button" tabindex="0"><div class="t">'+esc(c.title || '新对话')+'</div>' +
+      '<div class="p">'+esc(clip(c.lastMessage || convLabel(c.status), 60))+'</div></div>';
   }).join('');
-  box.querySelectorAll('.conv').forEach(el => el.onclick = () => selectConv(el.dataset.id));
+  box.querySelectorAll('.conv').forEach(el => {
+    el.onclick = () => selectConv(el.dataset.id);
+    el.onkeydown = e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); selectConv(el.dataset.id); } };
+  });
 }
 
 async function newChat(){
@@ -404,8 +444,8 @@ async function selectConv(id){
     state.conv = d.conversation; state.detail = d;
     $('objSel').disabled = true;
     $('title').textContent = d.conversation.title || '新对话';
-    $('status').textContent = statusLabel(d.conversation.status);
-    $('status').className = 'badge ' + (d.conversation.status === 'running' ? 'running' : d.conversation.status === 'error' ? 'error' : d.conversation.status === 'idle' ? 'ok' : '');
+    $('status').textContent = convLabel(d.conversation.status);
+    $('status').className = 'badge ' + convBadge(d.conversation.status);
     $('modelLabel').textContent = d.conversation.model || '默认模型';
     $('stopBtn').disabled = d.conversation.status !== 'running';
     $('toGoalBtn').disabled = false;
@@ -415,6 +455,7 @@ async function selectConv(id){
     const obj = state.objs.find(o => o.id === d.conversation.objectiveId);
     $('objLabel').textContent = obj ? ('· ' + (obj.title || obj.goal)) : '';
     renderMessages(d.messages || []);
+    $('send').disabled = false;
     await loadObjPanel(d.conversation.objectiveId);
     startStream(d.conversation.id);
     await loadConvs();
@@ -426,15 +467,34 @@ async function selectConv(id){
 function renderMessages(msgs){
   state.rendered.clear();
   const box = $('messages'); box.innerHTML = '';
-  if(!msgs.length){ box.innerHTML = '<div class="empty" id="empty"><b style="display:block;font-size:18px;color:var(--text);margin-bottom:8px">开始一个清晰的工作会话</b>直接提问，或描述一个想交给 ProjectOS 管理的目标。<br><span class="status-note">普通聊天不会创建任务；需要执行时，再转为托管目标并确认计划。</span></div>'; return; }
+  if(!msgs.length){ renderEmptyState(); return; }
   msgs.forEach(m => addMessage(m.role, m.text, m.id));
   scrollBottom();
+}
+
+function renderEmptyState(){
+  const box = $('messages');
+  if(!state.conv){
+    box.innerHTML = '<div class="welcome">' +
+      '<div class="welcome-mark" aria-hidden="true"><span></span><span></span><span></span></div>' +
+      '<h2>开始一个清晰的工作会话</h2>' +
+      '<p>可以直接提问，也可以把一段长期目标交给 ProjectOS 托管。普通聊天不会创建任务。</p>' +
+      '<div class="welcome-actions"><button class="btn primary" id="welcomeNew">＋ 新对话</button>' +
+      '<a class="btn" href="/">打开任务驾驶舱</a></div>' +
+      '<div class="welcome-note">写文件或执行命令会逐次请求批准；托管目标还需要单独确认计划。</div></div>';
+    const b = $('welcomeNew'); if(b) b.onclick = newChat;
+  } else {
+    box.innerHTML = '<div class="welcome"><h2>这个对话还没有消息</h2>' +
+      '<p>在下方输入第一句话。需要执行任务时，再用右上角“转为托管目标”。</p></div>';
+  }
+  $('send').disabled = !state.conv;
 }
 
 function addMessage(role, text, id){
   const key = role+'\x00'+text;
   if(id && state.rendered.has(id)) return null;
-  if(!id && state.rendered.has(key)) return null;
+  // An empty placeholder key must never block the next turn's live stream.
+  if(!id && text && state.rendered.has(key)) return null;
   if(id) state.rendered.add(id);
   state.rendered.add(key);
   const box = $('messages');
@@ -442,15 +502,43 @@ function addMessage(role, text, id){
   const el = document.createElement('div');
   el.className = 'msg ' + role;
   el.innerHTML = '<div class="who">'+(role === 'user' ? '你' : 'AI')+'</div>' +
-    '<div class="bubble">'+esc(text)+'</div>';
+    '<div class="bubble">'+(role === 'assistant' ? md(text) : esc(text))+'</div>';
   box.appendChild(el);
   scrollBottom();
   return el.querySelector('.bubble');
 }
+
+// Minimal, escape-first Markdown: code fences, inline code, bold, lists, links.
+function md(text){
+  let s = esc(text || '');
+  const blocks = [];
+  s = s.replace(/```[a-zA-Z0-9_+-]*\n([\s\S]*?)```/g, (m, code) => {
+    blocks.push('<pre class="code"><code>'+code.replace(/\n$/,'')+'</code></pre>');
+    return '\u0000B'+(blocks.length-1)+'\u0000';
+  });
+  s = s.replace(/^######\s+(.*)$/gm, '<h6>$1</h6>')
+       .replace(/^#####\s+(.*)$/gm, '<h5>$1</h5>')
+       .replace(/^####\s+(.*)$/gm, '<h4>$1</h4>')
+       .replace(/^###\s+(.*)$/gm, '<h3>$1</h3>');
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  s = s.replace(/(?:^|\n)((?:[-*]\s+.*(?:\n|$))+)/g, (m, block) =>
+    '\n<ul>' + block.trim().split('\n').map(l => '<li>'+l.replace(/^[-*]\s+/,'')+'</li>').join('') + '</ul>');
+  s = s.replace(/(?:^|\n)((?:\d+\.\s+.*(?:\n|$))+)/g, (m, block) =>
+    '\n<ol>' + block.trim().split('\n').map(l => '<li>'+l.replace(/^\d+\.\s*/,'')+'</li>').join('') + '</ol>');
+  s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  return s.replace(/\u0000B(\d+)\u0000/g, (m, i) => blocks[+i]);
+}
 function scrollBottom(){ const box=$('messages'); box.scrollTop = box.scrollHeight; }
 
 async function loadObjPanel(objectiveId){
-  if(!objectiveId){ $('objCard').innerHTML = '<div class="hint">未关联 Objective。</div>'; $('tasks').innerHTML = '<div class="hint">关联目标后显示任务。</div>'; return; }
+  if(!objectiveId){
+    $('objCard').innerHTML = '<div class="hint">未关联 Objective。</div>';
+    $('tasks').innerHTML = '<div class="hint">关联目标后显示任务。</div>';
+    renderEvidence(null);
+    return;
+  }
   try {
     const d = await api('/api/objectives/'+encodeURIComponent(objectiveId));
     $('objCard').innerHTML = '<div class="kv"><div>状态</div><div>'+esc(statusLabel(d.objective.status))+'</div>' +
@@ -464,20 +552,59 @@ async function loadObjPanel(objectiveId){
         esc(findings.map(f => (f.Severity || '') + ' ' + (f.Message || '')).join('；')) + '</div>');
     }
     const tasks = d.tasks || [];
-    $('tasks').innerHTML = tasks.length ? tasks.map(t =>
+    const c = d.counts || {};
+    $('tasks').innerHTML = (tasks.length ? '<div class="hint" style="margin-bottom:6px">' +
+        esc((c.accepted||0)+'/'+(c.total||tasks.length)+' 已通过 · '+(c.running||0)+' 执行中 · '+(c.blocked||0)+' 被卡住') + '</div>' : '') +
+      (tasks.length ? tasks.map(t =>
       '<div class="task"><span class="id">'+esc(t.id)+'</span><span>'+esc(clip(t.artifactPath || t.id, 24))+'</span><span class="st">'+esc(taskLabel(t.status))+'</span></div>').join('')
-      : '<div class="hint">还没有任务。</div>';
+      : '<div class="hint">还没有任务。</div>');
+    renderEvidence(d, objectiveId);
   } catch(e) { $('objCard').innerHTML = '<div class="hint">'+esc(e.message)+'</div>'; }
+}
+
+// Evidence tab is real data only: shared artifacts, delivery state, findings.
+function renderEvidence(d, objectiveId){
+  const box = $('evidenceCard');
+  if(!box) return;
+  if(!d){
+    const snap = state.projectSnapshot || {};
+    const verified = (snap.verified || []).length;
+    const decisions = (snap.decisions || []).length;
+    box.innerHTML = '<div class="hint">未关联目标。</div>' +
+      '<div class="kv" style="margin-top:8px"><div>项目已验证</div><div>'+verified+' 项</div>' +
+      '<div>已确认决策</div><div>'+decisions+' 条</div></div>' +
+      '<div class="hint" style="margin-top:6px">关联目标后显示交付产物与共享证据。</div>';
+    return;
+  }
+  const arts = d.sharedArtifacts || [];
+  const findings = d.objectiveFindings || [];
+  let html = '<div class="kv"><div>交付</div><div>'+(d.delivery ? '已生成' : '未生成')+'</div>' +
+    '<div>共享证据</div><div>'+arts.length+' 项</div></div>';
+  if(arts.length){
+    html += '<div style="margin-top:8px">' + arts.slice(0,5).map(a =>
+      '<div class="task"><span class="id">'+esc(a.evidenceId || '')+'</span>' +
+      '<span><a class="link" href="/files/'+encodeURIComponent(a.objectiveId||objectiveId)+'/'+encodeURIComponent(a.artifactPath||'')+'" target="_blank" rel="noopener">'+esc(clip(a.artifactPath || 'artifact', 28))+'</a></span>' +
+      '<span class="st">'+esc(a.verificationStatus || '')+'</span></div>' +
+      '<div class="hint" style="margin:-2px 0 8px 2px">v'+esc(a.planVersion||'—')+' · '+esc(String(a.artifactVersion||'').slice(0,20))+'</div>').join('') + '</div>';
+  } else {
+    html += '<div class="hint" style="margin-top:8px">还没有共享产物。</div>';
+  }
+  if(findings.length){
+    html += '<div class="hint" style="margin-top:8px;color:#b42318">Findings '+findings.length+' 条</div>';
+  }
+  html += '<div style="margin-top:9px"><a class="link" href="/#goal='+encodeURIComponent(objectiveId||'')+'">查看全部证据 →</a></div>';
+  box.innerHTML = html;
 }
 function taskLabel(s){ return ({pending:'待执行',running:'执行中',accepted:'已通过',blocked:'被卡住',rejected:'未通过',superseded:'已替换'})[s] || s; }
 
 async function send(){
   const text = $('input').value.trim();
-  if(!text || !state.conv) return;
+  if(!text) return;
+  if(!state.conv){ $('hint').textContent = '请先新建对话'; return; }
   $('input').value = ''; $('input').style.height = 'auto';
   state.lastUser = text;
   addMessage('user', text, '');
-  $('status').textContent = '执行中'; $('status').className = 'badge running'; $('stopBtn').disabled = false;
+  $('status').textContent = convLabel('running'); $('status').className = 'badge running'; $('stopBtn').disabled = false;
   try {
     await api('/api/conversations/'+encodeURIComponent(state.conv.id)+'/messages', {method:'POST',
       headers:{'Content-Type':'application/json'}, body:JSON.stringify({text})});
@@ -489,6 +616,8 @@ async function send(){
 }
 $('send').onclick = send;
 $('input').addEventListener('keydown', e => {
+  // Never send while an IME candidate window is open (Chinese/Japanese input).
+  if(e.isComposing || e.keyCode === 229) return;
   if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); }
 });
 $('input').addEventListener('input', () => {
@@ -548,6 +677,12 @@ function startStream(id){
           headers:{'X-Kernel-Token':state.token}, signal:ctrl.signal
         });
         if(!res.ok) throw new Error('SSE '+res.status);
+        if(state.ssErr){
+          state.ssErr = false;
+          $('eventHint').textContent = '已重新连接，正在同步…';
+          $('send').disabled = false;
+          await resyncConversation(id);
+        }
         const reader = res.body.getReader();
         const dec = new TextDecoder();
         let buf = '';
@@ -568,7 +703,11 @@ function startStream(id){
         }
       } catch(e) {
         if(ctrl.signal.aborted) return;
+        state.ssErr = true;
         $('eventHint').textContent = '连接断开，正在重连…';
+        $('status').textContent = '连接中断';
+        $('status').className = 'badge warn';
+        $('send').disabled = true;
       }
       await new Promise(r => setTimeout(r, 1200));
     }
@@ -601,7 +740,7 @@ function handleSSE(chunk, id, advance){
     }
     if(state.streaming){ state.streaming.textContent += d.delta || ''; scrollBottom(); }
   } else if(ev.kind === 'assistant'){
-    if(state.streaming){ state.streaming.classList.remove('streaming'); state.streaming.textContent = d.text || state.streaming.textContent; state.streaming = null; }
+    if(state.streaming){ state.streaming.classList.remove('streaming'); state.streaming.innerHTML = md(d.text || state.streaming.textContent); state.streaming = null; }
     else addMessage('assistant', d.text || '', '');
     scrollBottom();
   } else if(ev.kind === 'tool'){
@@ -614,10 +753,13 @@ function handleSSE(chunk, id, advance){
   } else if(ev.kind === 'permission_replied'){
     const el = document.querySelector('[data-perm="'+CSS.escape(String(d.requestId || ''))+'"]');
     if(el) el.remove();
+    if(!document.querySelector('.permission')){
+      $('approvalInspector').innerHTML = '<div class="hint">当前没有待处理审批。</div>';
+    }
   } else if(ev.kind === 'status'){
     const s = d.status || 'idle';
-    $('status').textContent = statusLabel(s);
-    $('status').className = 'badge ' + (s === 'running' ? 'running' : s === 'error' ? 'error' : 'ok');
+    $('status').textContent = convLabel(s);
+    $('status').className = 'badge ' + convBadge(s);
     $('stopBtn').disabled = s !== 'running';
     if(s !== 'running' && state.streaming){ state.streaming.classList.remove('streaming'); state.streaming = null; }
   } else if(ev.kind === 'error'){
@@ -701,7 +843,7 @@ async function boot(){
   await loadConvs();
   const first = state.convs[0];
   if(first) await selectConv(first.id);
-  else { $('messages').innerHTML = '<div class="empty">还没有对话。点左上角“新对话”。</div>'; }
+  else renderEmptyState();
 }
 boot();
 </script>

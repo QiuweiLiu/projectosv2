@@ -1079,8 +1079,10 @@ async function loadJobLine(){
 
 async function boot(){
   // #token=... is a convenience for a local demo link; the fragment never
-  // reaches the server.
+  // reaches the server. Capture #goal before any rewrite: loadObjectives()
+  // auto-selects the first objective and would otherwise replace the hash.
   const frag = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const deepLink = location.hash.match(/^#goal=(.+)$/);
   if (frag.get('token')) {
     localStorage.setItem('kernelToken', frag.get('token'));
     $('token').value = frag.get('token');
@@ -1092,9 +1094,7 @@ async function boot(){
   $('newBtn').classList.toggle('hidden', !state.control);
   $('token').parentElement.classList.toggle('hidden', !state.control);
   await loadObjectives();
-  const m = location.hash.match(/^#goal=(.+)$/);
-  if (m) selectObjective(decodeURIComponent(m[1]));
-  if (!state.id && state.objectives.length) selectObjective(state.objectives[0].id);
+  if (deepLink) selectObjective(decodeURIComponent(deepLink[1]));
   else if (state.id) { await loadDetail(); await loadReport(); await loadEvents(); await loadModels(); }
 }
 

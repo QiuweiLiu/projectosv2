@@ -54,7 +54,7 @@ func cmdRun(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	objPath := fs.String("objective", "", "objective JSON file")
 	dir := fs.String("dir", "", "state directory")
-	model := fs.String("model", "deepseek/deepseek-flash", "provider/model")
+	model := fs.String("model", defaultModel, "provider/model")
 	reviewerOn := fs.Bool("reviewer", false, "use a real agent reviewer")
 	maxRuns := fs.Int("max-runs", 0, "maximum runs (0 = unlimited)")
 	maxReviews := fs.Int("max-reviews", 0, "maximum reviewer sessions (0 = unlimited)")

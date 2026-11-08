@@ -33,7 +33,9 @@ import (
 	"projectos/kernel/internal/verify"
 )
 
-const defaultModel = "deepseek/deepseek-flash"
+// defaultModel is the built-in fallback when neither a flag nor models.json
+// names a model. Change it here only; every role resolves through it.
+const defaultModel = "opencode-go/deepseek-v4.1-flash"
 
 // aoBackend builds a model session backend. The model string is passed straight
 // to the harness, so any provider/model registered there can be used.
@@ -49,12 +51,17 @@ func aoBackend(env *aoenv.Env, projectID, model string) *ao.Backend {
 		Model: model, DataDir: env.DataDir})
 }
 
+// opencodeBin resolves the OpenCode CLI every role should use. Chat already
+// honours OPENCODE_BIN; planner/worker/reviewer must use the same binary or a
+// v1 CLI on PATH can reject a v2 config and fail the whole objective.
+func opencodeBin() string { return strings.TrimSpace(os.Getenv("OPENCODE_BIN")) }
+
 // openSessionBackend builds a single-purpose backend for planner/reporter work.
 // "opencode" needs no daemon; "ao" starts or reuses one.
 func openSessionBackend(dir, executor, model string) (exec.Backend, func(), error) {
 	if executor == "opencode" {
 		return opencodecli.New(opencodecli.Config{
-			Model: model, BaseDir: filepath.Join(dir, "repo"), WorkRoot: filepath.Join(dir, "work"),
+			Model: model, Bin: opencodeBin(), BaseDir: filepath.Join(dir, "repo"), WorkRoot: filepath.Join(dir, "work"),
 		}), func() {}, nil
 	}
 	env, err := aoenv.Setup(dir)
@@ -558,7 +565,7 @@ func goalRun(args []string) int {
 		backend = fake
 	} else if *executor == "opencode" {
 		backend = opencodecli.New(opencodecli.Config{
-			Model: workerModel, BaseDir: filepath.Join(*dir, "repo"), WorkRoot: filepath.Join(*dir, "work"),
+			Model: workerModel, Bin: opencodeBin(), BaseDir: filepath.Join(*dir, "repo"), WorkRoot: filepath.Join(*dir, "work"),
 		})
 	} else {
 		env, err = aoenv.Setup(*dir)
@@ -603,7 +610,7 @@ func goalRun(args []string) int {
 	roleBackend := func(model string) exec.Backend {
 		if *executor == "opencode" {
 			return opencodecli.New(opencodecli.Config{
-				Model: model, BaseDir: filepath.Join(*dir, "repo"), WorkRoot: filepath.Join(*dir, "work"),
+				Model: model, Bin: opencodeBin(), BaseDir: filepath.Join(*dir, "repo"), WorkRoot: filepath.Join(*dir, "work"),
 			})
 		}
 		return aoBackend(env, projectID, model)

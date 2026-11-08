@@ -31,6 +31,11 @@ Kernel 仍是 Task/Run/Evidence/Review 唯一权威；没有第二套 Scheduler 
   ProjectOS 多出 Planner + 2 Workers + 5 review/acceptance calls；这是成本负结果，不是
   ProjectOS 优势证明。详见 `reports/p6-benchmark-2026-11-07.md`。
 - **P5 保留**：场景 A 自动恢复、B/C 真实 worker 读取共享产物、C 中断后人工恢复完成。
+- **蓝白工作台真机验收**：审批闭环、流式、Handoff 草稿/确认、Cockpit 计划与执行前门禁、
+  失败 Recovery、完成证据、断线重连、项目切换均通过；修 11 项前端缺陷（流式去重、
+  状态标签、Markdown、欢迎态、深链、证据 Tab、审批复位、IME 回车等）。截图见 HANDOFF。
+- **OPENCODE_BIN**：planner/worker/reviewer/acceptance 现与聊天共用该变量（`goal.go`），
+  回归测试 `TestOpencodeBinHonoursEnvironment`；PATH 仍为 v1.18.15 时 planner 实测成功。
 
 ## Capabilities
 - Objective/Plan/Task/Run 状态机、DAG 并发、SQLite 单写者、事务性结算。
