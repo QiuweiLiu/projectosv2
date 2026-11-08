@@ -49,7 +49,7 @@ Evidence/Review 唯一权威，模型只提案，人在关键处确认。
 - P6 Task B/C 未跑；磁盘满/只读/WAL/Server 退出注入未做。
 
 ## Active
-工作副本 `~/dev/projectosv2`，未提交 `chat.html`/`ui.html`/`goal.go`/新增测试/控制面。
+工作副本 `~/dev/projectosv2`，HEAD `b11373d` 已 push，工作区 clean。
 服务已停止；`/private/tmp/projectos-chat-012346` 留有测试会话与已取消目标。
 
 ## Next
