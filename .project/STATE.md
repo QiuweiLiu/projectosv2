@@ -45,9 +45,9 @@ Kernel 仍是 Task/Run/Evidence/Review 唯一权威；没有第二套 Scheduler 
   额外回合）→ 会话流内联草稿（目标/预算/约束/产物/验收）→ 创建目标+计划 → 底部“托管流程”
   dock（步骤/任务/命令审批/开始/恢复/重新规划/取消）+ 侧栏同步骤与下一步；5s 轮询目标状态。
   未执行目标可“调整目标”（amend + plan），已执行/卡住可带 instruction 重新规划。
-- **撤回降级**：消息无远端 ID/无 session 直接本地回退；fork 404 先返回 409
-  `rewind_local_only`，二次确认后以 `localOnly:true` 只删本地并提示上下文未回退；不再把
-  本地 `msg_` 当远端 ID。
+- **撤回降级**：消息无远端 ID/无 session 直接本地回退；fork 404 先按文本+时间找回服务端
+  真实 ID 重试；仍找不到才 409 `rewind_local_only`，二次确认后 `localOnly:true` 只删本地。
+  不再把本地 `msg_` 当远端 ID。
 - **审查预算修复**：同一产物版本重试不再重复调用 reviewer，直接复用已记录结论；审查落库
   失败仅在用量确实未知时才全局停止，已知用量的策略性拒绝只阻塞当前任务。新增
   `TestIdenticalRetryReusesRecordedReviewAndDoesNotPoisonOthers`。

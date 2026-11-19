@@ -507,7 +507,8 @@
   远端消息 ID，整段 provider JSON 直接弹窗。原因是旧用户消息的 remote_id 可能指向已被
   重建/重启的会话，代码还回退到本地 ID。
 - 后端：`ForkSession` 把 404 `MessageNotFoundError` 映射为 `ErrForkMessageNotFound`；
-  `Rewind` 在消息无 remote_id、无 session 时直接本地回退；fork 404 时先返回 409
+  `Rewind` 在消息无 remote_id、无 session 时直接本地回退；fork 404 时先按文本 + 时间
+  找回服务端真实消息 ID 并重试 fork；仍找不到才返回 409
   `rewind_local_only`，界面二次确认后以 `localOnly:true` 重试，才删除本地消息/事件
   （`remoteForked:false`）。不再用本地 ID 当远端 ID；其他 fork 错误仍失败。
 - 前端：成功但未 fork 时提示“服务端上下文未回退”；不再弹 provider 原文。

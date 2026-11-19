@@ -317,3 +317,34 @@ func TestRewindWithoutRemoteIDFallsBackToLocalOnly(t *testing.T) {
 		t.Fatalf("status = %s", got.Status)
 	}
 }
+
+func TestMatchServerUserMessageHandlesContextPrefixAndWrongID(t *testing.T) {
+	at := time.Date(2026, 11, 10, 16, 9, 47, 0, time.UTC)
+	msgs := []opencodeserver.Message{
+		{ID: "msg_server_hello", Type: "user",
+			Text: "Project context (verified facts and evidence):\n..."},
+		{ID: "msg_server_assistant", Type: "assistant", Text: "你好！"},
+		{ID: "msg_server_next", Type: "user", Text: "你能做什么"},
+	}
+	msgs[0].Text += "\n\n你好"
+	msgs[0].Time.Created = at.Add(3 * time.Second).UnixMilli()
+	msgs[1].Time.Created = at.Add(4 * time.Second).UnixMilli()
+	msgs[2].Time.Created = at.Add(90 * time.Second).UnixMilli()
+	msgs[2].Text = "你能做什么"
+
+	if got := matchServerUserMessage(msgs, conversation.Message{
+		Role: "user", Text: "你好", CreatedAt: at,
+	}); got != "msg_server_hello" {
+		t.Fatalf("hello matched %q", got)
+	}
+	if got := matchServerUserMessage(msgs, conversation.Message{
+		Role: "user", Text: "你能做什么", CreatedAt: at.Add(88 * time.Second),
+	}); got != "msg_server_next" {
+		t.Fatalf("next matched %q", got)
+	}
+	if got := matchServerUserMessage(msgs, conversation.Message{
+		Role: "user", Text: "不存在的消息", CreatedAt: at,
+	}); got != "" {
+		t.Fatalf("unknown matched %q", got)
+	}
+}

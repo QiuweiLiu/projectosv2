@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"projectos/kernel/internal/conversation"
 	"projectos/kernel/internal/opencodeserver"
@@ -22,6 +23,38 @@ type RewindResult struct {
 	// False means only the local transcript was rewound (the server no longer
 	// knows the message).
 	RemoteForked bool `json:"remoteForked"`
+}
+
+// matchServerUserMessage finds the server-side copy of a local user message.
+// Older rows can carry a local id as their remote id; the first prompt may also
+// be prefixed with injected project context. Match by text containment and
+// closest timestamp so a wrong id does not turn into "history is gone".
+func matchServerUserMessage(msgs []opencodeserver.Message, target conversation.Message) string {
+	text := strings.TrimSpace(target.Text)
+	if text == "" {
+		return ""
+	}
+	best, bestDelta := "", int64((10*time.Minute)/time.Millisecond)
+	for _, msg := range msgs {
+		if msg.Type != "user" || msg.ID == "" {
+			continue
+		}
+		serverText := strings.TrimSpace(msg.Text)
+		if serverText != text && !strings.Contains(serverText, text) {
+			continue
+		}
+		if target.CreatedAt.IsZero() {
+			return msg.ID
+		}
+		delta := msg.Time.Created - target.CreatedAt.UnixMilli()
+		if delta < 0 {
+			delta = -delta
+		}
+		if delta < bestDelta {
+			best, bestDelta = msg.ID, delta
+		}
+	}
+	return best
 }
 
 // Rewind forks the OpenCode session before the selected user message, then
@@ -75,6 +108,16 @@ func (m *Manager) Rewind(ctx context.Context, conversationID, messageID string, 
 			return RewindResult{}, serr
 		}
 		forked, ferr := srv.ForkSession(ctx, sessionID, before)
+		if errors.Is(ferr, opencodeserver.ErrForkMessageNotFound) {
+			// The stored remote id can be a local id from an older build, or the
+			// server may have regenerated it. Resolve the real message by text
+			// and time before falling back to a local-only rewind.
+			if page, perr := srv.MessagesPage(ctx, sessionID, 200, "", "asc"); perr == nil {
+				if actual := matchServerUserMessage(page.Data, target); actual != "" && actual != before {
+					forked, ferr = srv.ForkSession(ctx, sessionID, actual)
+				}
+			}
+		}
 		switch {
 		case ferr == nil:
 			sessionID = forked.ID

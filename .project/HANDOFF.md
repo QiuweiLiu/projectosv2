@@ -28,7 +28,7 @@ Evidence/Review 唯一权威，模型只提案，人在关键处确认。
   plan v2 与侧栏同步；用户目标 dock 显示 T3b 命令审批与“批准并开始执行”。
 - 托管/审批：重启后旧会话已中断、0 审批 0 建议；404 拒绝无弹窗；短句开始走控制路径。
 - 撤回：无 remote_id/无 session 的会话真实撤回成功（removed=1，remoteForked=false）；
-  fork 404 先 409，二次确认后 localOnly 重试；其他 fork 错误仍失败。
+  fork 404 先按文本+时间找回真实 server id；仍失败才 409 + localOnly 二次确认。
 - 重规划：真实目标 v1 7 blocked → v2 4 pending；fake 测试覆盖替换/无操作；同产物复用审查结论。
 - 驾驶舱：7 任务目标显示已卡住、6 条中文原因、恢复/重规划；run/pause 隐藏。
 - 模型/身份/排版/多标签/撤回/问题表单按既有场景复验。

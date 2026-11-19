@@ -138,7 +138,9 @@ OpenCode 会发送 `session.reasoning.started/delta/ended`。Kernel 把它们映
 
 - 消息在 OpenCode 会话里仍存在：fork 到该消息之前，切换会话并删除本地消息/事件；
 - 消息没有远端 ID（本地控制短语）或会话没有 session：直接只回退本地对话；
-- fork 返回 `MessageNotFoundError`（服务端重启、会话被重建）：接口先返回 409
+- fork 返回 `MessageNotFoundError`（存储的远端 ID 是旧的本地 ID，或服务端重生成了 ID）：
+  先按消息文本 + 创建时间在服务端会话里找回真实消息 ID 再 fork；
+- 仍找不到（服务端重启、会话被重建）：接口先返回 409
   `rewind_local_only`，界面明确告知“只能从本地移除 N 条，上下文不会回退”，用户再次确认后
   以 `{"localOnly":true}` 重试，才删除本地消息/事件。结果 `remoteForked:false`。
   不再把本地 `msg_...` ID 当作远端 ID 去 fork，也不会把整段 provider 错误弹给用户。
