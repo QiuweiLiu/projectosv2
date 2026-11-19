@@ -154,6 +154,14 @@ details[open] summary::before{content:"▾ "}
 .approval-grid label{font-size:.75rem;color:var(--muted);display:flex;flex-direction:column;gap:.25rem}
 .approval-grid input{border:1px solid var(--line);border-radius:7px;padding:.35rem .45rem;font:inherit}
 .approval-check{display:flex;gap:.45rem;align-items:flex-start;font-size:.82rem;line-height:1.5;margin:.5rem 0 .9rem}
+.attention{margin:14px 0 0;border:1px solid #F5D7A7;background:#FFFBEB;border-radius:12px;padding:12px 14px}
+.attention-head{display:flex;gap:10px;align-items:flex-start}
+.attention-mark{width:22px;height:22px;border-radius:50%;background:#FEF3C7;color:#B45309;display:grid;place-items:center;font-weight:700;font-size:12px;flex:none}
+.attention-title{font-size:13px;font-weight:600;color:#7C2D12}
+.attention-text{font-size:12.5px;color:#7C4A03;line-height:1.6;margin-top:2px}
+.attention-list{margin-top:8px;font-size:12px;color:#7C4A03;display:grid;gap:4px}
+.attention-list b{font-weight:600}
+.attention-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
 .modal-actions{display:flex;justify-content:flex-end;gap:.5rem}
 .empty{color:var(--muted);font-size:.86rem;padding:1.2rem 0}
 .skeleton{height:1rem;background:linear-gradient(90deg,#f1f0ed,#f8f7f5,#f1f0ed);border-radius:6px;margin:.4rem 0;animation:pulse 1.4s infinite}
@@ -318,6 +326,18 @@ button:focus-visible{outline:2px solid #8a4325;outline-offset:2px}
           </div>
         </div>
 
+        <div class="attention hidden" id="attention">
+          <div class="attention-head">
+            <span class="attention-mark">!</span>
+            <div style="min-width:0;flex:1">
+              <div class="attention-title" id="attentionTitle">需要你处理</div>
+              <div class="attention-text" id="attentionText"></div>
+            </div>
+          </div>
+          <div class="attention-list" id="attentionList"></div>
+          <div class="attention-actions" id="attentionActions"></div>
+        </div>
+
         <div class="card">
           <div class="card-head">
             <h2>汇报</h2>
@@ -325,6 +345,7 @@ button:focus-visible{outline:2px solid #8a4325;outline-offset:2px}
               <button class="btn small hidden" id="btnModelReport">重新生成汇报</button>
             </div>
           </div>
+          <div class="hint hidden" id="reportStale" style="margin-bottom:8px">以下汇报生成于上次运行；当前状态以上方提示为准。</div>
           <p class="report-text" id="reportText">…</p>
           <div class="report-meta" id="reportMeta"></div>
         </div>
@@ -349,7 +370,7 @@ button:focus-visible{outline:2px solid #8a4325;outline-offset:2px}
           <div id="recoveryBody" class="hint">—</div>
           <div class="row" id="recoveryActions" style="margin-top:.5rem;display:none">
             <button class="btn primary" id="btnRecover">重新排队</button>
-            <button class="btn primary" id="btnReplan" style="display:none">重新规划并继续</button>
+            <button class="btn primary" id="btnReplan" style="display:none">重新规划</button>
             <span class="hint" id="recoveryHint"></span>
           </div>
         </div>
@@ -411,7 +432,7 @@ button:focus-visible{outline:2px solid #8a4325;outline-offset:2px}
   <div class="modal hidden" id="approval">
     <div class="modal-card">
       <div class="card-head"><h2>执行前确认</h2></div>
-      <div class="hint">worker 可写；planner / reviewer / acceptance / reporter 只读。命令校验以当前用户身份执行，不是沙箱。</div>
+      <div class="hint" id="approvalWhy">这一步只启动调度；任务仍会逐项审查与验收。命令以当前用户身份执行，不是沙箱。</div>
       <div id="approvalReasons"></div>
       <div id="approvalTasks"></div>
       <div class="approval-grid">
@@ -419,10 +440,10 @@ button:focus-visible{outline:2px solid #8a4325;outline-offset:2px}
         <label>最多审查次数<input id="maxReviews" type="number" min="1" value="8"></label>
         <label>token 预算<input id="maxTokens" type="number" min="1" value="600000"></label>
       </div>
-      <label class="approval-check"><input id="approveCheck" type="checkbox"> 我已确认上述高风险任务与命令，允许现在执行。</label>
+      <label class="approval-check"><input id="approveCheck" type="checkbox"> <span id="approvalCheckLabel">我已核对上述任务与命令，允许现在开始执行。</span></label>
       <div class="modal-actions">
         <button class="btn" id="approvalCancel">取消</button>
-        <button class="btn primary" id="btnApproveRun">批准并执行</button>
+        <button class="btn primary" id="btnApproveRun">批准并开始执行</button>
       </div>
     </div>
   </div>
@@ -437,6 +458,72 @@ const TASK_LABEL = {accepted:'已通过', running:'执行中', pending:'待执�
 const OBJ_LABEL = {completed:'已完成', active:'进行中', failed:'未完成', cancelled:'已取消', draft:'草稿', planned:'待确认', paused:'已暂停', planning:'规划中'};
 const TASK_CLASS = {accepted:'ok', running:'run', blocked:'bad', rejected:'bad', pending:'warn', superseded:'plain'};
 const OBJ_CLASS = {completed:'ok', active:'run', failed:'bad', cancelled:'plain', planned:'warn', draft:'plain'};
+let attentionSeq = 0;
+function objectiveView(d){
+  const s = d.objective.status, c = d.counts || {};
+  if(s === 'active'){
+    if(c.running > 0) return {label:'执行中', cls:'run'};
+    if(c.blocked > 0) return {label:'已卡住', cls:'bad'};
+    if(c.total && c.accepted === c.total) return {label:'收尾中', cls:'run'};
+    if(c.pending > 0) return {label:'待执行', cls:'warn'};
+  }
+  return {label: OBJ_LABEL[s] || s, cls: OBJ_CLASS[s] || 'plain'};
+}
+function friendlyError(err){
+  const e = String(err || '');
+  if(/review budget.*exhausted|review not recorded/i.test(e)) return '审查次数用尽，需要人工决定是否继续';
+  if(/dependency blocked/i.test(e)) return '上游任务未完成';
+  if(/usage unknown after unrecorded review/i.test(e)) return '预算用量未知，需要人工确认';
+  if(/budget/i.test(e)) return '预算用尽';
+  if(/timeout/i.test(e)) return '执行超时';
+  return e || '被卡住';
+}
+async function renderAttention(d, r){
+  const gen = ++attentionSeq;
+  const box = $('attention'); if(!box) return;
+  if(!d){ box.classList.add('hidden'); return; }
+  const s = d.objective.status, c = d.counts || {};
+  const blocked = (d.tasks || []).filter(t => t.status === 'blocked');
+  const failed = s === 'failed';
+  if(!(failed || (s === 'active' && (blocked.length > 0 || (r && r.failure))))){
+    box.classList.add('hidden');
+    const stale = $('reportStale'); if(stale) stale.classList.add('hidden');
+    return;
+  }
+  const needs = !!(r && (r.needsApproval || r.state === 'needs_approval' || (r.failure && r.failure.requiresApproval)));
+  $('attentionTitle').textContent = failed ? '目标未完成' :
+    (blocked.length ? ('有 ' + blocked.length + ' 个任务被卡住') : '目标需要恢复');
+  $('attentionText').textContent = failed
+    ? '有任务没有通过验收，目标没有继续推进。'
+    : (needs ? '目标当前没有在运行；系统需要你批准一次恢复，之后才会继续。'
+             : '目标当前没有在运行；先处理被卡住的任务，或重新规划。');
+  box.classList.remove('hidden');
+  const list = $('attentionList'), actions = $('attentionActions');
+  list.innerHTML = '<div class="hint">正在读取失败原因…</div>';
+  actions.innerHTML = '';
+  const sample = blocked.slice(0, 8);
+  const details = await Promise.all(sample.map(t =>
+    api('/api/tasks/' + encodeURIComponent(t.id) + '?objective=' + encodeURIComponent(state.id)).catch(() => null)));
+  if(gen !== attentionSeq) return;
+  const rows = sample.map((t, i) => {
+    const err = (details[i] && details[i].error) || '被卡住';
+    return '<div title="' + esc(clip(err, 300)) + '"><b>' + esc(t.id) + '</b> · ' + esc(friendlyError(err)) + '</div>';
+  });
+  if(blocked.length > sample.length) rows.push('<div class="hint">还有 ' + (blocked.length - sample.length) + ' 个卡住任务…</div>');
+  list.innerHTML = rows.join('') || '<div class="hint">没有可显示的任务级原因。</div>';
+  const add = (label, cls, fn) => {
+    const b = document.createElement('button');
+    b.className = 'btn' + (cls ? ' ' + cls : '');
+    b.textContent = label; b.onclick = fn; b.disabled = state.pending;
+    actions.appendChild(b);
+  };
+  if(needs) add('批准恢复并重试', 'primary', () => recoverObjective());
+  if(blocked.length && state.control) add('重新规划', '', replanObjective);
+  if(failed) add('继续改进', '', () => $('btnContinue').click());
+  add('查看卡住的任务', '', () => $('taskCard').scrollIntoView({behavior:'smooth', block:'start'}));
+  const stale = $('reportStale'); if(stale) stale.classList.toggle('hidden', !(blocked.length || failed));
+}
+
 const EVENT_LABEL = {
   started:'开始执行', accepted:'通过验收', rejected:'未通过', blocked:'被卡住',
   review_blocked:'审查未通过', acceptance_blocked:'验收未通过', objective_cancelled:'目标已取消',
@@ -445,7 +532,7 @@ const EVENT_LABEL = {
   observe_retry:'等待执行器响应', quarantine_persist_failed:'隔离状态保存失败',
   review_unrecorded:'审查结果未保存', acceptance_not_recorded:'验收结果未保存',
   recovery_retry:'自动恢复重试', recovery_approval_required:'恢复需要批准',
-  recovery_approved:'恢复已批准', recovery_replan:'自动重新规划', artifact_publish_error:'共享产物发布失败'
+  recovery_approved:'恢复已批准', recovery_replan:'自动重新规划', replanned:'已重新规划', artifact_publish_error:'共享产物发布失败'
 };
 
 const ROLES = [
@@ -453,7 +540,7 @@ const ROLES = [
   ['acceptance', '验收'], ['reporter', '汇报'],
 ];
 
-const state = { control:false, objectives:[], id:null, detail:null, task:null, events:[], pending:false, report:null, reportAsked:{}, progress:null, replanNext:false };
+const state = { control:false, objectives:[], id:null, detail:null, task:null, events:[], pending:false, report:null, reportAsked:{}, progress:null };
 let detailGen = 0, taskGen = 0;
 
 function token(){ return $('token').value.trim() || localStorage.getItem('kernelToken') || ''; }
@@ -487,8 +574,9 @@ async function loadObjectives(){
   state.objectives.forEach(o => {
     const el = document.createElement('div');
     el.className = 'obj' + (o.id === state.id ? ' on' : '');
+    const ov = objectiveView({objective:{status:o.status}, counts:o.tasks || {}});
     el.innerHTML = '<div class="g">' + esc(o.title || o.goal) + '</div>' +
-      '<div class="r"><span class="pill ' + (OBJ_CLASS[o.status] || 'plain') + '">' + esc(OBJ_LABEL[o.status] || o.status) + '</span>' +
+      '<div class="r"><span class="pill ' + ov.cls + '">' + esc(ov.label) + '</span>' +
       '<span>' + o.tasks.accepted + '/' + o.tasks.total + ' 已通过</span></div>';
     el.onclick = () => selectObjective(o.id);
     box.appendChild(el);
@@ -523,8 +611,9 @@ async function loadDetail(){
   const same = !d.objective.title || d.objective.title === d.objective.goal;
   $('goalText').textContent = same ? '' : d.objective.goal;
 
-  $('objStatus').textContent = OBJ_LABEL[d.objective.status] || d.objective.status;
-  $('objStatus').className = 'pill ' + (OBJ_CLASS[d.objective.status] || 'plain');
+  const statusView = objectiveView(d);
+  $('objStatus').textContent = statusView.label;
+  $('objStatus').className = 'pill ' + statusView.cls;
   const pv = d.planVersion || d.objective.planVersion;
   $('planPill').textContent = pv ? ('计划 v' + pv + (d.planStatus === 'draft' ? ' · 待确认' : '')) : '还没有计划';
   $('deliveryPill').textContent = d.delivery ? '已生成交付' : '尚未交付';
@@ -551,16 +640,20 @@ function updateActions(d){
   const unplanned = !d.plan;
   const plan = $('btnPlan'), confirm = $('btnConfirm'), run = $('btnRun'), cancel = $('btnCancel');
   const pause = $('btnPause'), resume = $('btnResume');
+  const running = d.counts.running > 0;
+  const blocked = d.counts.blocked > 0;
+  const canStart = s === 'active' && !running && !blocked && d.counts.pending > 0;
   plan.disabled = !(canWrite && unplanned && (s === 'draft' || s === 'planned'));
   confirm.disabled = !(canWrite && s === 'planned');
-  run.disabled = !(canWrite && s === 'active' && (d.counts.pending > 0 || d.counts.running > 0));
+  run.disabled = !(canWrite && canStart);
   cancel.disabled = !(canWrite && ['draft','planned','active','paused'].includes(s));
   const show = (el, on) => { el.style.display = on ? '' : 'none'; };
   show(plan, s === 'draft' || (s === 'planned' && unplanned));
   show(confirm, s === 'planned');
-  show(run, s === 'active' && (d.counts.pending > 0 || d.counts.running > 0));
-  show(pause, s === 'active' && !d.pauseRequested);
-  show(resume, s === 'active' && !!d.pauseRequested);
+  show(run, canStart);
+  run.textContent = d.counts.accepted > 0 ? '继续执行' : '开始执行';
+  show(pause, s === 'active' && running && !d.pauseRequested);
+  show(resume, s === 'active' && !!d.pauseRequested && !running);
   pause.disabled = !canWrite;
   resume.disabled = !canWrite;
   show(cancel, ['draft','planned','active','paused'].includes(s));
@@ -654,7 +747,7 @@ async function loadReport(){
   // No model report yet: show the factual summary in the meantime, and ask the
   // model once automatically once the objective is finished.
   $('reportText').textContent = r.text || '还没有汇报。';
-  $('reportMeta').textContent = '系统摘要 · 模型版尚未生成';
+  $('reportMeta').textContent = '';
   $('btnModelReport').textContent = '生成汇报';
   const s = state.detail ? state.detail.objective.status : '';
   const terminal = ['completed','failed','cancelled'].includes(s);
@@ -724,12 +817,13 @@ async function loadRecovery(){
   if (!state.id) return;
   let r;
   try { r = await api('/api/objectives/' + encodeURIComponent(state.id) + '/progress'); }
-  catch (e) { $('recoveryBody').textContent = '恢复状态不可用：' + e.message; return; }
+  catch (e) { $('recoveryBody').textContent = '恢复状态不可用：' + e.message; renderAttention(state.detail, null); return; }
   state.progress = r;
   const body = $('recoveryBody'), actions = $('recoveryActions'), btn = $('btnRecover');
   if (!r || !r.failure) {
     body.textContent = '当前没有需要恢复的失败。';
     actions.style.display = 'none';
+    renderAttention(state.detail, r);
     return;
   }
   const f = r.failure;
@@ -743,19 +837,21 @@ async function loadRecovery(){
   if (f.evidence && f.evidence.length) lines.push('证据：' + f.evidence.filter(Boolean).slice(0, 3).join(' / '));
   body.innerHTML = lines.map(x => '<div>' + esc(clip(x, 220)) + '</div>').join('');
   const showRetry = state.control && ((r.state === 'recoverable_failure' && f.action === 'retry' && r.recoveryAvailable) || (r.state === 'needs_approval' && f.action === 'approve'));
-  const showReplan = state.control && r.state === 'blocked' && f.action === 'replan';
+  const blockedCount = state.detail && state.detail.counts ? (state.detail.counts.blocked || 0) : 0;
+  const showReplan = state.control && blockedCount > 0;
   actions.style.display = (showRetry || showReplan) ? '' : 'none';
   btn.style.display = showRetry ? '' : 'none';
   $('btnReplan').style.display = showReplan ? '' : 'none';
   btn.disabled = !showRetry || state.pending;
   $('btnReplan').disabled = !showReplan || state.pending;
   btn.textContent = f.requiresApproval ? '批准并重新排队' : '重新排队';
-  $('recoveryHint').textContent = showReplan ? '按现有计划做一次有界重规划。' : (showRetry ? '重新排队只恢复该任务，已验收成果不会被重跑。' : '');
+  $('recoveryHint').textContent = showReplan ? '重新规划会替换未完成任务，已通过的成果保留；不会自动执行。' : (showRetry ? '重新排队只恢复该任务，已验收成果不会被重跑。' : '');
+  renderAttention(state.detail, r);
 }
 
-$('btnRecover').onclick = async () => {
+async function recoverObjective(){
   if (!state.id || state.pending) return;
-  if (!confirm('确认恢复这个任务？系统会把它重新排队，随后可点击“执行”。')) return;
+  if (!confirm('批准恢复会把失败任务重新排队，并继续执行；已验收的成果不会重跑。继续？')) return;
   state.pending = true; $('btnRecover').disabled = true;
   try {
     await api('/api/objectives/' + encodeURIComponent(state.id) + '/recover',
@@ -763,7 +859,8 @@ $('btnRecover').onclick = async () => {
     await loadDetail(); await loadObjectives(); await loadRecovery(); await loadEvents();
   } catch (e) { alert(e.message); }
   finally { state.pending = false; loadRecovery(); }
-};
+}
+$('btnRecover').onclick = recoverObjective;
 
 /* ---------- graph ---------- */
 function renderGraph(tasks){
@@ -973,8 +1070,8 @@ async function act(path, body){
 
 $('btnPlan').onclick = () => act('/api/objectives/' + encodeURIComponent(state.id) + '/plan');
 $('btnConfirm').onclick = () => act('/api/objectives/' + encodeURIComponent(state.id) + '/confirm');
-$('btnRun').onclick = () => { state.replanNext = false; openApproval(); };
-$('btnReplan').onclick = () => { state.replanNext = true; openApproval(); };
+$('btnRun').onclick = () => openApproval();
+$('btnReplan').onclick = () => replanObjective();
 $('btnPause').onclick = () => act('/api/objectives/' + encodeURIComponent(state.id) + '/pause');
 $('btnResume').onclick = () => act('/api/objectives/' + encodeURIComponent(state.id) + '/unpause');
 $('approvalCancel').onclick = () => $('approval').classList.add('hidden');
@@ -984,14 +1081,21 @@ function openApproval(){
   const d = state.detail;
   if (!d) return;
   const reasons = d.approvalReasons || [];
+  const riskText = {low:'低风险', medium:'中风险', high:'高风险'};
   const tasks = (d.tasks || []).filter(t => t.risk === 'high' || (t.commands || []).length);
-  $('approvalReasons').innerHTML = reasons.length
+  $('approvalWhy').textContent = '这一步只启动调度；任务仍会逐项审查与验收。' +
+    (reasons.length ? '以下任务包含命令校验，命令以当前用户身份执行，不是沙箱。' : '本计划没有高风险任务或命令校验。');
+  $('approvalReasons').innerHTML = (!tasks.length && reasons.length)
     ? reasons.map(x => '<div class="approval-reason">' + esc(x) + '</div>').join('')
-    : '<div class="hint">本计划没有高风险任务或命令校验。</div>';
+    : '';
   $('approvalTasks').innerHTML = tasks.length
-    ? tasks.map(t => '<div class="approval-task"><b>' + esc(t.id) + '</b> · ' + esc(t.risk || 'normal') +
+    ? tasks.map(t => '<div class="approval-task"><b>' + esc(t.id) + '</b> · ' + esc(riskText[t.risk] || t.risk || '普通') +
+        (t.commands && t.commands.length ? ' · 命令校验' : '') +
         (t.commands || []).map(c => '<div><code>' + esc(c) + '</code></div>').join('') + '</div>').join('')
     : '';
+  $('approvalCheckLabel').textContent = reasons.length
+    ? '我已核对上述任务与命令，允许现在开始执行。'
+    : '本计划无需额外风险确认，点击即可开始。';
   $('approveCheck').checked = reasons.length === 0;
   $('approveCheck').disabled = reasons.length === 0;
   $('btnApproveRun').disabled = reasons.length > 0;
@@ -999,6 +1103,46 @@ function openApproval(){
 }
 
 $('approveCheck').onchange = () => { $('btnApproveRun').disabled = !$('approveCheck').checked; };
+
+async function waitJob(donePrefix, failPrefix, timeoutMs){
+  const deadline = Date.now() + (timeoutMs || 300000);
+  let raw = '';
+  while(Date.now() < deadline){
+    try {
+      const jobs = await api('/api/jobs');
+      raw = (jobs && jobs[state.id]) || '';
+    } catch(e) { /* keep polling */ }
+    if(raw.startsWith(donePrefix)) return {ok:true, raw};
+    if(raw.startsWith(failPrefix)) return {ok:false, raw};
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  return {ok:false, raw};
+}
+
+async function replanObjective(){
+  if(!state.id || state.pending) return;
+  if(!confirm('重新规划会为未完成的任务生成一份新计划：已通过的成果保留，未完成的任务会被替换；不会自动执行。继续？')) return;
+  state.pending = true;
+  document.querySelectorAll('#actions .btn, #attentionActions button').forEach(b => b.disabled = true);
+  $('jobLine').textContent = '正在重新规划…（只生成计划，不执行任务）';
+  try {
+    await api('/api/objectives/' + encodeURIComponent(state.id) + '/replan', {method:'POST'});
+    const r = await waitJob('replanned', 'replan failed');
+    await loadDetail(); await loadObjectives(); await loadRecovery(); await loadEvents(); await loadJobLine();
+    if(r.ok){
+      $('jobLine').textContent = '已重新规划：请核对新任务，然后点“开始执行”。';
+    } else if(r.raw && r.raw.startsWith('replan failed')){
+      $('jobLine').textContent = '重新规划失败：' + clip(r.raw.replace(/^replan failed:\s*/, ''), 180);
+    } else {
+      $('jobLine').textContent = '重新规划耗时较长；稍后刷新查看结果。';
+    }
+  } catch(e) {
+    $('jobLine').textContent = '重新规划失败：' + e.message;
+  } finally {
+    state.pending = false;
+    if(state.detail) updateActions(state.detail);
+  }
+}
 
 async function submitApproval(){
   const d = state.detail;
@@ -1009,10 +1153,8 @@ async function submitApproval(){
     approveRisk: true,
     maxRuns: Number($('maxRuns').value) || 8,
     maxReviews: Number($('maxReviews').value) || 8,
-    maxTokens: Number($('maxTokens').value) || 600000,
-    replan: !!state.replanNext
+    maxTokens: Number($('maxTokens').value) || 600000
   });
-  state.replanNext = false;
 }
 $('btnCancel').onclick = () => {
   if (!confirm('确定取消这个目标？已通过的任务会保留，没完成的会停下。')) return;
@@ -1072,8 +1214,23 @@ async function loadJobLine(){
       cancelling:'正在取消…', 'writing report':'正在生成汇报…', 'report ready':'汇报已生成',
       'explaining findings':'正在解释审查意见…', explained:'中文解释已生成',
       'planning continuation':'正在生成后续计划…', 'continuation planned':'后续计划已生成',
-      'continue failed':'后续计划生成失败'};
-    $('jobLine').textContent = map[raw] || raw;
+      'continue failed':'后续计划生成失败',
+      replanning:'正在重新规划…（只生成计划，不执行任务）',
+      replanned:'已重新规划，请核对任务后开始执行',
+      'replan failed':'重新规划失败'};
+    let text = map[raw] || '';
+    if(raw.startsWith('replan failed:')){
+      const why = raw.replace(/^replan failed:\s*/, '');
+      text = /nothing to replan/i.test(why) ? '没有需要重新规划的任务' : ('重新规划失败：' + clip(why, 160));
+    }
+    if(raw.startsWith('run failed:')){
+      const why = raw.replace(/^run failed:\s*/, '');
+      if(/approval required/i.test(why)) text = '执行停在恢复审批；请用上方按钮批准或重新规划。';
+      else if(/needs explicit approval/i.test(why)) text = '新计划包含需要确认的任务；请点“开始执行”核对。';
+      else text = '执行未完成：' + clip(why, 140);
+    }
+    if(raw === 'running' && state.detail && state.detail.counts && state.detail.counts.running === 0) text = '';
+    $('jobLine').textContent = text;
   } catch (e) { $('jobLine').textContent = ''; }
 }
 

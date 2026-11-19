@@ -105,3 +105,87 @@ func TestSplitConversationPath(t *testing.T) {
 		}
 	}
 }
+
+func TestConfirmHandoffRefusesRunningConversation(t *testing.T) {
+	root := t.TempDir()
+	cstore, err := conversation.Open(filepath.Join(root, "conversations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cstore.Close()
+	mgr := chat.New(chat.Config{Bin: "/nonexistent-opencode", Root: root, DefaultModel: "provider/model"}, cstore)
+	defer mgr.Close()
+	mux, ctl, err := buildMux(newWorkspace(root), true, mgr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	c, err := mgr.CreateConversation("chat", "", "", "", "provider/model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cstore.SetStatus(c.ID, conversation.StatusRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodPost,
+		ts.URL+"/api/conversations/"+c.ID+"/handoff/draft-1/confirm", nil)
+	req.Header.Set("X-Kernel-Token", ctl.token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("confirm while running = %d, want 409", res.StatusCode)
+	}
+	// The guard must run before any objective is created.
+	if _, ok, err := cstore.Get(c.ID); err != nil || !ok {
+		t.Fatalf("conversation = %v %v", ok, err)
+	}
+}
+
+func TestStartHandoffRefusesRunningConversation(t *testing.T) {
+	root := t.TempDir()
+	cstore, err := conversation.Open(filepath.Join(root, "conversations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cstore.Close()
+	mgr := chat.New(chat.Config{Bin: "/nonexistent-opencode", Root: root, DefaultModel: "provider/model"}, cstore)
+	defer mgr.Close()
+	mux, ctl, err := buildMux(newWorkspace(root), true, mgr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	c, err := mgr.CreateConversation("chat", "", "", "", "provider/model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cstore.SetStatus(c.ID, conversation.StatusRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/conversations/"+c.ID+"/handoff/start",
+		strings.NewReader(`{"text":"可以开始规划"}`))
+	req.Header.Set("X-Kernel-Token", ctl.token)
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("start while running = %d, want 409", res.StatusCode)
+	}
+	msgs, err := cstore.Messages(c.ID, 10, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 0 {
+		t.Fatalf("control phrase was stored during a running turn: %+v", msgs)
+	}
+}

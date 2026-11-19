@@ -460,6 +460,26 @@ func (e *Engine) review(ctx context.Context, run domain.Run, task domain.Task, a
 				return "", false, err
 			}
 		}
+		// A retry can reproduce a byte-identical artifact. The reviewer already
+		// saw this exact version, so another call cannot add information and the
+		// per-version review budget would reject the record afterwards. Reuse the
+		// recorded verdict instead of spending tokens on a foregone conclusion.
+		if reviewed, found, rerr := e.reviewRecorded(run.TaskID, reviewVersion, kind); rerr != nil {
+			return "", false, rerr
+		} else if found {
+			if !reviewed {
+				// This exact version already passed review. Do not spend another
+				// reviewer call, but still run the acceptance gate.
+				return e.judge(ctx, run, task, artifact, depPaths)
+			}
+			next, serr := e.settle(run, task, artifact, domain.RunSucceeded, false, true,
+				"review: artifact unchanged since the last review")
+			if serr != nil {
+				return "", false, serr
+			}
+			e.record(run.TaskID, "review_blocked", "artifact unchanged for "+reviewVersion)
+			return next, true, nil
+		}
 		outcome, rerr := e.reviewer.Review(ctx, exec.ReviewRequest{
 			Task: task, Artifact: artifact, Kind: kind, Codes: codes, Prior: prior, RunID: run.ID, Deps: depPaths,
 		})
@@ -500,8 +520,14 @@ func (e *Engine) review(ctx context.Context, run domain.Run, task domain.Task, a
 				return "", false, serr
 			}
 			e.record(run.TaskID, "review_unrecorded", err.Error())
-			if uerr := e.stopUnknownUsage("budget: usage unknown after unrecorded review"); uerr != nil {
-				return "", false, uerr
+			// The reviewer's own usage is known (it is settled above); only stop
+			// the whole objective when there is genuinely no usage to record.
+			// A policy rejection such as a per-version review limit must not
+			// poison unrelated pending tasks with "usage unknown".
+			if outcome.PromptChars+outcome.OutputChars+outcome.PromptTokens+outcome.OutputTokens == 0 {
+				if uerr := e.stopUnknownUsage("budget: usage unknown after unrecorded review"); uerr != nil {
+					return "", false, uerr
+				}
 			}
 			return next, true, nil
 		}
@@ -805,6 +831,24 @@ func (e *Engine) retryFindings(task domain.Task) ([]domain.Finding, error) {
 		}
 	}
 	return nil, nil
+}
+
+// reviewRecorded reports whether this exact artifact version was already
+// reviewed with the requested kind, and whether that verdict blocked.
+func (e *Engine) reviewRecorded(taskID domain.TaskID, version string, kind domain.ReviewKind) (bool, bool, error) {
+	if strings.TrimSpace(version) == "" {
+		return false, false, nil
+	}
+	reviews, err := e.store.ReviewsFor(taskID)
+	if err != nil {
+		return false, false, err
+	}
+	for _, rev := range reviews {
+		if rev.ArtifactVersion == version && rev.Kind == kind {
+			return rev.Blocking(), true, nil
+		}
+	}
+	return false, false, nil
 }
 
 // reviewFingerprint binds a review to the exact artifact state a reviewer saw.

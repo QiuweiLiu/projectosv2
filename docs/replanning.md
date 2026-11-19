@@ -4,7 +4,7 @@
 
 ## 触发
 
-只有 `kernel goal run --replan` 才启用，且满足：
+自动重规划只在 `kernel goal run --replan` 中启用，且满足：
 
 - 当前计划版本存在任务未接受（`blocked`）；
 - 本进程已重规划次数 < `--max-replans`（默认 1）；
@@ -33,10 +33,36 @@ Apply
 | 约束 | 值 |
 |---|---|
 | 每次运行自动重规划次数 | 1（`--max-replans`） |
-| 单次新增任务 | ≤ 5 |
+| 单次新增任务（自动） | ≤ 5 |
+| 单次新增任务（显式 `goal replan`） | ≤ 当前计划任务数（总任务上限 20） |
 | 计划总任务 | ≤ 20 |
 | 已接受任务 | 不可删除、不可改 artifact、不可改 validator |
 | 运行中的任务 | 不会被 supersede（只处理 pending/blocked） |
+
+## 聊天内调整
+
+`kernel goal replan --instruction "..."`（HTTP `POST /api/objectives/{id}/replan`
+`{"instruction":"..."}`）会把操作者在聊天里写的要求附加到 planner 的 feedback，用于
+“已执行/被卡住”的目标。尚未执行的目标改动走 `goal plan --instruction` 或
+`POST /api/objectives/{id}/amend` + `/plan`，不改写已验收任务的证据。
+
+## 显式重新规划
+
+`goal run --replan` 在启动时已有 blocked 任务的情况下不会生效：recovery 先要求人工
+批准并退出。界面上的“重新规划”调用独立命令 `kernel goal replan`（HTTP
+`POST /api/objectives/{id}/replan`），语义见 `docs/recovery.md`：保留已通过任务、
+替换未完成任务、生成新版本并回到 active，但**不自动执行**。
+
+## 产物未变化时的审查
+
+同一个任务重试后可能产出与上次字节相同的产物（同一 `reviewFingerprint`）。此时
+reviewer 对同一版本的结论不会变化，重复调用只会浪费 token，并触发“每个版本最多一次
+full + 一次 targeted”的上限。Engine 现在直接复用已记录的同版本审查结论：
+
+- 结论为 blocking → 该任务 blocked，原因写“artifact unchanged since the last review”；
+- 结论为 clean → 跳过 reviewer，但仍运行 acceptance；
+- 审查未能落库且确有未知用量时才全局停止；已知用量的策略性拒绝（如版本审查上限）
+  只影响当前任务，不再把无关 pending 任务标成“usage unknown”。
 
 ## 语义
 

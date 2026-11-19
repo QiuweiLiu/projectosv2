@@ -75,6 +75,46 @@ HTTP：
 `unknown_execution_state` 不会自动重试；`goal run` 会保留 active 状态并输出人工检查提示，
 避免把可能已经发生的外部副作用再执行一次。
 
+## 驾驶舱状态与动作
+
+驾驶舱不再直接显示底层状态字符串，而是派生一个用户状态：
+
+- active + running → **执行中**；active + blocked → **已卡住**；
+- active + pending 且无 blocked/running → **待执行**；全部通过 → **收尾中**。
+
+动作按状态收敛：运行中只显示暂停/取消；有 blocked 时隐藏“开始执行”，顶部显示
+“需要你处理”卡片，列出每个卡住任务的原因（审查预算/上游阻塞/预算用量未知）以及
+“批准恢复并重试”“重新规划并继续”“查看卡住的任务”。原始 CLI 错误行不再直接显示在
+标题下；历史汇报会标注“生成于上次运行，当前状态以上方提示为准”。
+
+执行前确认弹窗会说明：只启动调度、任务仍逐项审查与验收、命令以当前用户身份执行；
+并列出需要确认的任务/命令、风险级别和预算。只有存在命令校验/高风险时才要求勾选。
+
+## 显式重新规划（失败后）
+
+`goal run --replan` 只在运行循环内、且失败类别允许 replan 时才生效；如果 Objective
+在启动时已经有 blocked 任务，recovery 会先要求人工批准并直接退出，此时 `--replan`
+什么也不会做。界面上的“重新规划”因此走独立命令：
+
+```text
+kernel goal replan --dir D [--planner model|fake] [--plan-file P] [--context ...]
+POST /api/objectives/{id}/replan
+```
+
+语义：
+
+- 只接受 active / failed 且存在 blocked/rejected 任务的 Objective；没有 blocked 时是
+  无操作，不产生新计划；
+- 保留所有已通过任务（逐字复制，不允许改写）；未完成任务由新计划替换，被丢弃的
+  pending/blocked 任务标记为 superseded；
+- 新任务必须使用新 id（不能复用历史 id），由计划校验与历史 id 检查强制；
+- 生成失败或被拒绝时保留原计划，Objective 状态不变；
+- 成功后写入 plan vN+1 并置为 confirmed，Objective 回到 active，清除过期的
+  recovery pending；**不自动执行任务**，仍需用户在驾驶舱确认后点“开始执行”。
+
+HTTP 端点异步执行并返回 `{"status":"replanning"}`；`GET /api/jobs` 依次出现
+`replanning` → `replanned` 或 `replan failed: ...`。驾驶舱轮询该状态，完成后刷新任务图。
+
 ## 尚未实现
 
 - 逐工具审批与跨进程恢复预算共享：当前恢复预算按 Objective 持久化，工具级审批仍由

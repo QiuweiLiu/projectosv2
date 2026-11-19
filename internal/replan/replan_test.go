@@ -23,6 +23,20 @@ func plan(ids ...string) goal.Plan {
 	return p
 }
 
+func TestValidateReplacementLimitAllowsExplicitFullReplan(t *testing.T) {
+	old := plan("T1", "T2")
+	next := plan("T3", "T4", "T5", "T6", "T7", "T8", "T9")
+	if err := replan.ValidateReplacement(old, next, nil); err == nil {
+		t.Fatal("the automatic 5-task limit must still reject seven new tasks")
+	}
+	if err := replan.ValidateReplacementLimit(old, next, nil, 7); err != nil {
+		t.Fatalf("explicit limit 7 should allow the replacement: %v", err)
+	}
+	if err := replan.ValidateReplacementLimit(old, next, nil, 6); err == nil {
+		t.Fatal("replacement above the explicit limit must be rejected")
+	}
+}
+
 func TestValidateReplacementProtectsAcceptedTasks(t *testing.T) {
 	old := plan("T1", "T2")
 	accepted := []string{"T1"}

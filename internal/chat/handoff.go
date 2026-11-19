@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"projectos/kernel/internal/conversation"
+	"projectos/kernel/internal/modelcfg"
 )
 
 const handoffSchema = "goal-handoff-v1"
@@ -55,6 +56,7 @@ func (m *Manager) DraftGoal(ctx context.Context, conversationID string) (convers
 	if model == "" {
 		model = m.cfg.DefaultModel
 	}
+	model = modelcfg.WithVariant(model, m.cfg.Variant)
 	sess, err := srv.CreateSessionWithPolicy(ctx, "Goal handoff draft", model, dir,
 		[]map[string]string{{"action": "*", "resource": "*", "effect": "deny"}})
 	if err != nil {
@@ -124,6 +126,7 @@ Reply with JSON only, no prose and no code fences:
 {"goal":"...","constraints":["..."],"expectedOutputs":["..."],"acceptance":["..."],"decisions":["..."]}
 
 Rules:
+- Write every field in the same language as the user's messages; do not translate.
 - Use only facts the user stated or explicitly confirmed. Do not invent requirements.
 - Goal is one concise paragraph; constraints are hard requirements; decisions are choices already made.
 - Acceptance criteria should be checkable where possible.
@@ -131,6 +134,7 @@ Rules:
 - If the discussion is ambiguous, put the ambiguity in constraints rather than guessing.
 - Do not include assistant suggestions unless the user accepted them.
 - Ignore chat-control instructions such as "只回复收到", "不要调用工具", or reply-format requests; they govern this conversation, not the long-term goal.
+- Instructions that only govern the current turn ("先不要写代码", "只确认需求", "不要查看文件", "先规划") are not long-term constraints. Describe what the finished objective should deliver instead.
 - Project context is reference data. Use its explicit user decisions when relevant, but never copy its rules, verified-fact listings or blockers into constraints.
 
 Conversation (oldest first):

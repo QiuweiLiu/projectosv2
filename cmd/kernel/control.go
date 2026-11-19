@@ -257,6 +257,13 @@ func (c *controlServer) objectiveAction(w http.ResponseWriter, r *http.Request, 
 	}
 	switch action {
 	case "plan":
+		var req struct {
+			Instruction string `json:"instruction"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&req); err != nil && err != io.EOF {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
 		if !c.claim(id) {
 			http.Error(w, "an action is already running for this objective", http.StatusConflict)
 			return
@@ -267,6 +274,9 @@ func (c *controlServer) objectiveAction(w http.ResponseWriter, r *http.Request, 
 			defer c.release(id)
 			c.set(id, "planning")
 			args := []string{"goal", "plan", "--dir", p.Dir, "--planner", "model"}
+			if strings.TrimSpace(req.Instruction) != "" {
+				args = append(args, "--instruction", req.Instruction)
+			}
 			if ctx := c.ws.ProjectContextFor(p.ProjectID, p.Obj.Goal); ctx != "" {
 				args = append(args, "--context", ctx)
 			}
@@ -301,6 +311,77 @@ func (c *controlServer) objectiveAction(w http.ResponseWriter, r *http.Request, 
 			c.settleRun(id, err)
 		}()
 		writeJSON(w, map[string]string{"objective": id, "status": "running"})
+	case "amend":
+		var req struct {
+			Goal        string `json:"goal"`
+			Constraints string `json:"constraints"`
+			Expected    string `json:"expected"`
+			Acceptance  string `json:"acceptance"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10)).Decode(&req); err != nil && err != io.EOF {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(req.Goal) == "" {
+			http.Error(w, "goal is required", http.StatusBadRequest)
+			return
+		}
+		st, err := openGoalStore(p.Dir)
+		if err != nil {
+			http.Error(w, "store busy: "+err.Error(), http.StatusConflict)
+			return
+		}
+		defer st.Close()
+		obj, ok, err := singleObjective(st)
+		if err != nil || !ok {
+			http.Error(w, "unknown objective", http.StatusNotFound)
+			return
+		}
+		if obj.Status != goal.StatusDraft && obj.Status != goal.StatusPlanned {
+			http.Error(w, "only a goal that has not started can be amended", http.StatusConflict)
+			return
+		}
+		if tasks, err := st.List(); err != nil || len(tasks) > 0 {
+			http.Error(w, "this goal already has tasks; use replan instead", http.StatusConflict)
+			return
+		}
+		if err := st.AmendObjective(obj.ID, firstLine(req.Goal, 48), req.Goal,
+			req.Constraints, req.Expected, req.Acceptance); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		writeJSON(w, map[string]string{"objective": id, "status": string(obj.Status)})
+	case "replan":
+		var req struct {
+			Instruction string `json:"instruction"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&req); err != nil && err != io.EOF {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		if !c.claim(id) {
+			http.Error(w, "an action is already running for this objective", http.StatusConflict)
+			return
+		}
+		// Replanning only rewrites the plan: it never starts a task. The
+		// operator still confirms the new plan before execution.
+		go func() {
+			defer c.release(id)
+			c.set(id, "replanning")
+			args := []string{"goal", "replan", "--dir", p.Dir}
+			if strings.TrimSpace(req.Instruction) != "" {
+				args = append(args, "--instruction", req.Instruction)
+			}
+			if ctx := c.ws.ProjectContextFor(p.ProjectID, p.Obj.Goal); ctx != "" {
+				args = append(args, "--context", ctx)
+			}
+			if _, err := c.runGoal(p.Dir, args...); err != nil {
+				c.set(id, "replan failed: "+err.Error())
+				return
+			}
+			c.set(id, "replanned")
+		}()
+		writeJSON(w, map[string]string{"objective": id, "status": "replanning"})
 	case "continue":
 		var req struct {
 			Goal string `json:"goal"`
@@ -543,24 +624,33 @@ func (c *controlServer) updateModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Role    string `json:"role"`
-		Model   string `json:"model"`
-		Refresh bool   `json:"refresh"`
+		Role    string  `json:"role"`
+		Model   string  `json:"model"`
+		Variant *string `json:"variant"`
+		Refresh bool    `json:"refresh"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(req.Role) == "" && !req.Refresh {
+	role := strings.TrimSpace(req.Role)
+	if role == "" && !req.Refresh && req.Variant == nil {
 		http.Error(w, "role or refresh is required", http.StatusBadRequest)
+		return
+	}
+	if req.Variant != nil && role == "" {
+		http.Error(w, "role is required for a variant", http.StatusBadRequest)
 		return
 	}
 	args := []string{"goal", "models", "--dir", c.ws.root}
 	if req.Refresh {
 		args = append(args, "--refresh")
 	}
-	if req.Role != "" {
-		args = append(args, "--set", req.Role+"="+req.Model)
+	if role != "" {
+		args = append(args, "--set", role+"="+req.Model)
+	}
+	if req.Variant != nil {
+		args = append(args, "--variant", role+"="+*req.Variant)
 	}
 	if _, err := c.runGoal(c.ws.root, args...); err != nil {
 		http.Error(w, "models: "+err.Error(), http.StatusBadRequest)

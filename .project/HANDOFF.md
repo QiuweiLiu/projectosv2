@@ -1,58 +1,53 @@
 # Handoff
-Status: p6 + 蓝白工作台真机验收
+Status: p6 + 工作台 / 聊天托管 / 多标签
 
 ## Goal
 在 Go Kernel 上提供长期、多目标、可恢复的 AI 科研/工程工作台；Kernel 是 Task/Run/
 Evidence/Review 唯一权威，模型只提案，人在关键处确认。
 
 ## Done
-- **P6.0–P6.3**：Manifest 版本锁、Evidence 预算/等级、故障注入、分页、Task A 对照
-  （见 `reports/p6-benchmark-2026-11-07.md`）。
-- **蓝白工作台**：`chat.html` 蓝白 Token/系统字体/三栏（260+流式+312 可折叠）/四 Tab；
-  `ui.html` 同步换肤；`docs/desktop.md` 改蓝白。
-- **本轮真机验收修复**：
-  - 流式去重键导致第二轮起不再逐字显示（`addMessage` 空文本占位）；
-  - 会话状态显示英文/绿色（`interrupted`）→ `convLabel/convBadge`；
-  - 回复 Markdown 原样输出 → 轻量转义后渲染粗体/代码/列表/链接；
-  - 空工作区无欢迎态、无会话仍可发送 → `renderEmptyState` + 发送禁用；
-  - 项目切换后仍显示他项目会话 → 关闭会话、保留草稿并提示；
-  - 断线只改页脚 → 顶部“连接中断”、禁用发送、重连后自动补偿；
-  - `/#goal=<id>` 深链被首个目标覆盖（`loadObjectives` 抢先改写 hash）；
-  - Inspector 证据 Tab 原为静态说明 → 真实 sharedArtifacts/delivery/Findings；
-  - 已处理审批刷新后仍显示“待处理” → `permission_replied` 复位；
-  - 任务标题常显；IME 回车误发送；会话行不可键盘访问。
+- **P6.0–P6.3**：Manifest 版本锁、Evidence 预算/等级、故障注入、分页、Task A 对照。
+- **工作台**：蓝白三栏 + 四 Tab + 块级 Markdown/柔和动效；窄窗 header 换行。
+- **多标签**：每标签独立 serve/端口/WKWebView；窗口先开、异步准备；iCloud 未下载先提示；
+  关闭只停自身；原生 alert/confirm/prompt。
+- **模型**：6 角色独立模型 + 思考强度（`provider/model#variant`）；空缓存自动刷新；
+  `OPENCODE_BIN`；桌面壳自动发现 CLI。
+- **对话控制**：思考展开/折叠；生成中三处停止；Session 注入 ProjectOS 身份；
+  托管前先停生成、清审批；审批 404 内联提示；启动清理遗留 running。
+- **聊天托管**：建议/短句“可以开始规划”→ 内联草稿（目标+执行预算）→ 创建目标+计划 →
+  底部“托管流程”dock（步骤/任务/命令审批/开始/恢复/重新规划/取消）+ 侧栏步骤与下一步；
+  未执行可改目标（amend+plan），已执行可带说明 replan。托管后建议卡不再出现。
+- **撤回**：运行中先停止再 fork Session 到目标消息前，删除其后消息/事件并恢复输入；
+  消息不在远端（无 remote_id/无 session/fork 404）时只回退本地并明确提示。
+- **驾驶舱**：派生执行中/已卡住/待执行；卡住时隐藏开始，顶部“需要你处理”卡片列出原因与
+  恢复/重规划；原始 CLI 错误不再显示；`goal replan` 真正替换未完成任务。
 
 ## Verified
-- 24 包 `go test -count=1`、`-race`、`vet` 全绿；`desktop --check`、`node --check`、
-  `git diff --check` 通过。
-- `OPENCODE_BIN` 实测：PATH 仍为 v1.18.15，仅设该变量即可规划（12,922 in / 185 out）。
-- 默认模型实测：空工作区无 models.json，日志 `planner model: opencode-go/deepseek-v4.1-flash`，
-  生成 1 个任务。
-- 审批闭环：新会话 → write 触发 `permission` → 允许一次 → 卡片消失、工具完成、
-  `approve-check.txt` 落盘、回 idle（`state-C2-*.png`）。
-- 流式：第 2 轮起出现 `.bubble.streaming`、状态“回复中”，结束回“空闲”并渲染 Markdown。
-- Handoff：草稿可编辑并确认 → 建 Objective + 计划；计划失败错误留在弹窗，不误报成功。
-- Cockpit：计划→确认→执行前审批弹窗（未真正执行）；失败目标显示 Recovery 与预算；
-  完成目标显示 1/1 与共享证据 Manifest。
-- 断线/重连：停 serve → “连接中断”+发送禁用；重启 → 自动重连并 resync。
-- 项目切换：会话列表按项目过滤、草稿保留、上下文更新。
-- 截图：`/tmp/state-A-empty2.png`、`final-B-conversation2.png`、`state-C2-pending|approved.png`、
-  `state-D-draft.png`、`state-E-rungate.png`、`state-F|G|H-*.png`。
+- 24 包 `go test -count=1`、`vet` 全绿；`desktop --check`、`node --check` 通过。
+- 聊天托管：scratch 真实草稿 25s → 预算持久化 → confirm 54s → planned 计划卡；调整目标后
+  plan v2 与侧栏同步；用户目标 dock 显示 T3b 命令审批与“批准并开始执行”。
+- 托管/审批：重启后旧会话已中断、0 审批 0 建议；404 拒绝无弹窗；短句开始走控制路径。
+- 撤回：无 remote_id/无 session 的会话真实撤回成功（removed=1，remoteForked=false）；
+  fork 404 先 409，二次确认后 localOnly 重试；其他 fork 错误仍失败。
+- 重规划：真实目标 v1 7 blocked → v2 4 pending；fake 测试覆盖替换/无操作；同产物复用审查结论。
+- 驾驶舱：7 任务目标显示已卡住、6 条中文原因、恢复/重规划；run/pause 隐藏。
+- 模型/身份/排版/多标签/撤回/问题表单按既有场景复验。
 
 ## Open
-- 未点击：拒绝/总是允许、继续改进、暂停/取消、Recovery（避免再执行与花费）。
-- 环境：PATH 上 `opencode` 仍为 v1.18.15；已修 `goal.go` 让 planner/worker/reviewer/
-  acceptance 全部使用 `OPENCODE_BIN`（新增回归测试）。仅设置该变量即可规划，无需改 PATH。
-- 默认模型已统一为 `opencode-go/deepseek-v4.1-flash`（全部角色，单点 `defaultModel`）。
-- 独立 `reviewer` 子代理鉴权过期，未执行独立评审；auditor 只读核对已完成。
-- 蓝白升级尚未在 WKWebView 真窗口截图；Cockpit headless 截图曾挂起，改用 CDP。
-- P6 Task B/C 未跑；磁盘满/只读/WAL/Server 退出注入未做。
+- 思考过程不落库；分类器每轮多一次轻量调用，暂无开关。
+- `opencode models` 可能因插件激活失败；已有回退。
+- 旧会话在 OpenCode server 重启后依赖 404 重建 Session，可能丢上下文。
+- 撤回只回滚对话；缺少远端消息 ID 时会拒绝。
+- 启动清理假定回合属于当前 Kernel 进程；远端仍在跑时由 Sync 补回。
+- iCloud 工作区仍会 dataless；建议本地磁盘。
+- P6 Task B/C、磁盘满/只读/WAL/Server 退出注入未做；独立 reviewer 鉴权过期。
 
 ## Active
-工作副本 `~/dev/projectosv2`，HEAD `b11373d` 已 push，工作区 clean。
-服务已停止；`/private/tmp/projectos-chat-012346` 留有测试会话与已取消目标。
+工作副本 `~/dev/projectosv2`，HEAD `b11373d` 已 push；本轮未提交：`desktop/main.m`、
+`chat.html`、`ui.html`、`goal*`/`control`/`serve`/`chat_api.go`、
+`internal/{chat,modelcfg,opencodeserver,replan,engine,report,conversation,store}`、`docs/*`、控制面。
 
 ## Next
-1. 用户确认后提交并推送本轮 UI 验收、`OPENCODE_BIN` 与默认模型修改。
-2. 补点击类验证（拒绝/总是允许、继续改进、暂停/取消、Recovery）。
-3. 跑 Task B/C 与剩余故障注入。
+1. 用户确认后提交并推送本轮改动。
+2. 聊天托管：确认后自动收起历史工具卡；审批历史留痕。
+3. 补 Task B/C、剩余故障注入。

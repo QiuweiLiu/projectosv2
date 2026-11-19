@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"projectos/kernel/internal/domain"
@@ -118,6 +119,25 @@ func (s *Store) ListObjectives() ([]goal.Objective, error) {
 }
 
 // MoveObjective validates the state machine transition before writing it.
+// AmendObjective edits the goal definition while it has not started. The SQL
+// guard is deliberate: once a plan has run, changing the goal would invalidate
+// the evidence that was accepted against it.
+func (s *Store) AmendObjective(id, title, goalText, constraints, expected, acceptance string) error {
+	if strings.TrimSpace(goalText) == "" {
+		return fmt.Errorf("goal must not be empty")
+	}
+	res, err := s.db.Exec(`UPDATE objectives SET title=?, goal=?, constraints=?, expected=?,
+		acceptance=?, updated_at=? WHERE id=? AND status IN ('draft','planned')`,
+		title, goalText, constraints, expected, acceptance, now(), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("objective can only be amended before execution")
+	}
+	return nil
+}
+
 func (s *Store) MoveObjective(id string, next goal.Status) error {
 	o, ok, err := s.GetObjective(id)
 	if err != nil {

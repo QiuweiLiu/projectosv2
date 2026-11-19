@@ -340,3 +340,176 @@
 - 旧默认 `deepseek/deepseek-flash` 在当前 v2 provider 未注册，导致未配置 models.json 时计划失败。
 - 回退方式：改 `defaultModel` 一处，或在工作区 `models.json` 按角色覆盖；不改 CLI 与 API 契约。
 - 验证：新增 `TestDefaultModelAppliesToEveryRole`，逐角色断言回退值。
+
+## 2026-11-08 — K-D054：多工作区用多标签 + 每标签独立 serve
+- 一个标签 = 一个 Workspace 根目录 = 一个 `kernel serve` 实例（自动端口）+ 一个 WKWebView；
+  标签同时保活，切换只换可见视图，不重启服务。
+- 不采用“单 serve 聚合多根”：workspace 的 DB/lock/work/serve.json 都绑定单目录，
+  多实例隔离更小风险，也复用既有 CLI 与状态文件。
+- 端口从 8799 起探测空闲；最多 8 个标签；关闭标签只停该标签自己启动的服务；
+  退出停全部自己启动的服务，已在外部运行的 daemon 不动。
+- 持久化 `ProjectOSWorkspacePaths` / `ProjectOSActiveWorkspacePath`；`PROJECTOS_DIR`
+  保持单标签临时模式，不写偏好。只改 desktop，无 Kernel/API 变更。
+- 验证：`--check-multi` 双端口存活；`--dump-tabs` 验证 URL/切换/关闭；标签栏 PNG。
+
+## 2026-11-09 — K-D055：模型列表与各角色模型设置
+- 聊天头部“设置”面板直接设置 6 个角色（chat/planner/worker/reviewer/acceptance/reporter），
+  复用 `/api/models` 与 `models.json`；不再要求用户去 Cockpit 才能分开配置。
+- 列表为空时页面自动刷新一次；刷新失败只提示，不阻塞聊天。
+- 刷新命令先 `opencode models`，失败再 `--standalone models`，并短暂重试；
+  两次都为空则报错且**不覆盖**已有缓存（避免把好缓存洗成空）。
+- 桌面外壳在未显式设置 `OPENCODE_BIN` 时自动查找 OpenCode Desktop 最新 CLI，并注入每个
+  kernel 子进程；Finder 启动的 GUI 应用 PATH 很短，否则 chat/planner 找不到正确 CLI。
+- 验证：空缓存自动填充 160 项；`env -i PATH=/usr/bin:/bin --check-models` 通过；
+  `TestRefresh*` 覆盖 plain/fallback/空结果保护。
+
+## 2026-11-10 — K-D056：工作区启动不得阻塞窗口
+- 事故：`~/Documents/测试` 在 iCloud Drive 且为 dataless 占位符，`serve` 首次读 kernel.db
+  卡在下载，daemon 与 app 同步调用一起挂住，表现为“应用打不开”。
+- 外壳启动前检查目录/`kernel.db` 的 iCloud 下载状态；未下载则跳过该标签并提示，
+  不再启动服务。
+- 所有 `RunKernel` 调用统一 20s 超时并终止子进程；端口最多尝试 5 个；失败的标签在启动后
+  汇总提示，其余标签照常打开。
+- 不自动删除或迁移用户数据；只从标签列表移除，目录保留。验证 `--check-workspace`：
+  测试目录 needsDownload=1，本地 state=0；混合启动 6s 内窗口可用。
+
+## 2026-11-10 — K-D057：标签异步准备，iCloud 未下载时先下载
+- 启动不再同步等待任何工作区：先建窗口与标签占位，再按标签后台准备；当前标签优先。
+- 标签状态：pending / downloading / starting / ready / failed。下载与启动都显示在标签内；
+  失败提供“重试”和“在 Finder 中显示”。
+- iCloud 未下载：同时调用 `NSFileManager startDownloadingUbiquitousItemAtURL` 与
+  `brctl download`，轮询 `NSURLIsUbiquitousItemKey`，完成后启动服务；15 分钟超时。
+- 服务启动用串行队列，避免多个标签同时抢 8799；关闭标签会取消准备并只停自己启动的服务。
+- 验证：两份标签 dump 状态 Ready/Downloading；实际下载完成后 8799/8800 同时可用。
+
+## 2026-11-09 — K-D058：每角色思考强度用原生 model#variant
+- 不新增自有协议：思考强度按 OpenCode 的 `provider/model#variant` 组合，服务端 session
+  的 model.variant 与 CLI `-m` 都接受该格式（已用临时 server 验证回显）。
+- `models.json` 增加 `variants: {role: value}`；预设 minimal/low/medium/high/max，空为默认。
+- 回退与模型一致：reviewer/acceptance 未设模型时跟随 worker 的 variant；chat 未设模型时
+  跟随 worker；显式模型只用自身 variant。聊天 variant 在创建会话时写入，新会话生效。
+- 兼容：`parseModel` 支持 #variant；旧的不带 variant 的模型字符串不变。
+- 测试：`TestSetVariantAndFallbacks`、`TestWithVariant`、`TestParseModel` 扩展；
+  UI 6 角色强度下拉与 API 持久化已实测。
+
+## 2026-11-11 — K-D059：思考过程、自动托管建议与可视化确认
+- 思考过程：订阅 `session.reasoning.started/delta/ended`，映射为 `reasoning_*` 实时事件；
+  不写事件表（避免长链思考膨胀/泄漏），UI 按回合折叠。模型无 reasoning 时无影响。
+- 自动建议：每轮 assistant 结束后用聊天模型做一次短 JSON 分类（禁用工具、不套 reasoning
+  variant），命中写入 `handoff_suggestion`；用户点击才提取 Goal Draft，不自动创建。
+- 建议持久化便于刷新回放；UI 只保留最新一条，忽略记录在 localStorage。
+- 确认面板改为“目标 + 三步流程 + 摘要卡片”，保留“编辑细节”；确认仍只创建+计划。
+- Handoff 提取要求使用用户语言，并忽略“先不要写代码/只确认需求”等回合级指令。
+- 验证：真实 reasoning 事件、0.95 建议、持久化回放、中文 Goal、UI 截图。
+
+## 2026-11-11 — K-D060：撤回消息用 session fork，不做文件回滚
+- 撤回 = 在目标用户消息之前 fork OpenCode Session（复制投影历史），切换 Conversation 的
+  session_id；然后删除该消息及其后的消息与事件，避免 SSE 回放旧回合。
+- 只回滚对话上下文；文件写入、命令副作用、已托管 Task 不回滚，并在确认框明确提示。
+- 要求会话空闲；fork 失败或无远端消息 ID 时保留原状并报错，不静默只删本地记录。
+- 事件清理优先从对应 user 事件 seq 起删除；找不到时清空该会话事件，避免旧回合复活。
+- 验证：API 删除 2 条并换 Session；新 Session 可继续发送；UI 4→2 条、输入恢复原文。
+
+## 2026-11-11 — K-D061：中断后清理失效审批并解释缺失回复
+- 事故观感：会话被中断后，旧的 permission 卡片仍留在消息流和右侧面板，看起来像“还在等审批”，
+  但实际不会再继续；用户误以为助手没有回复是功能缺失。
+- 状态变为 interrupted/error 时移除未处理审批，右侧标记失效；若最后一条仍是用户消息且没有
+  助手回复，显示提示与“重新编辑/继续”。
+- 撤回按钮从 hover-only 改为常显低对比，悬停加强，避免找不到。
+- 验证：真实中断会话（only-user + 2 个失败 shell）审批清零、提示出现、撤回可见。
+
+## 2026-11-11 — K-D062：思考过程可控 + question 表单一等支持
+- 思考过程默认展开，用户可在输入区切换展开/折叠并写入 localStorage；单块仍可点击切换。
+  自动折叠只在用户选择“折叠”时发生。
+- 生成中发送禁用，输入区与思考行都提供“停止”，复用现有 stop 中断语义。
+- question 工具：permission action=question 不渲染允许/拒绝，而是自动允许一次并读取
+  OpenCode form；按字段类型渲染并提交 answer。权限卡在 permission_replied 时保留，
+  直到表单完成或会话中断。
+- 验证：真实 question 工具生成二选一表单，UI 选 A 后模型回复“收到 A”，状态回 idle。
+
+## 2026-11-12 — K-D063：桌面壳必须实现 WKUIDelegate 对话框
+- 事故：点击“撤回”无反应。根因是 WKWebView 未设置 UIDelegate，`confirm()` 不显示且直接
+  返回 false，撤回逻辑在确认处静默退出；运行中按钮又曾被禁用，进一步表现为无反馈。
+- 修复：桌面壳实现 alert/confirm/prompt 的 WKUIDelegate（NSAlert sheet）；撤回按钮在运行中
+  保持可点，确认文案说明“会先停止当前生成”，随后 stop → 等 idle → fork → 删除。
+- 缺少远端消息 ID 时显示提示，不再静默返回。
+- 验证：桌面二进制包含 UIDelegate；运行中页面撤回按钮可点且文案正确；真机点击仍待复验。
+
+## 2026-11-12 — K-D064：ProjectOS 身份 + 块级 Markdown + 柔和动效
+- 身份：聊天 Session 创建/复用时通过 OpenCode instructions API 写入 projectos instruction，
+  明确“ProjectOS 助手，OpenCode 只是执行运行时”；避免“你能干什么”回答成 OpenCode。
+- 排版：回复改为块级 Markdown（段落/标题/列表/引用/代码/表格）；代码块从深色改为浅灰卡片，
+  表格支持横向滚动，行高 1.8，接近 Claude 的阅读节奏。
+- 动效：按钮 hover/active、消息进入、思考块展开使用 120–200ms 过渡，尊重 reduced-motion。
+- 修复：状态 running 事件不再重复创建“正在思考”；question 卡出现时隐藏思考。
+- 验证：身份问答、表格/代码/引用渲染、空闲无残留动画。
+
+## 2026-11-12 — K-D065：驾驶舱用派生状态和单一主行动
+- 问题：active 既显示“进行中/正在执行”，又保留“开始执行”；blocked 时按钮仍可点，
+  报告与状态矛盾，用户不知道卡在哪、下一步做什么。
+- active 派生：running→执行中；blocked→已卡住；pending→待执行；全通过→收尾中。
+- 动作收敛：running 只显示暂停/取消；blocked 隐藏开始/暂停，显示“需要你处理”卡片
+  （任务级原因 + 批准恢复/重新规划/查看）；仅 pending 且无 blocked/running 才显示开始。
+- 原始 `/api/jobs` 错误不再直接铺在标题下；历史汇报标注“生成于上次运行”。
+- 执行前弹窗说明只启动调度、仍会审查/验收、命令非沙箱；风险级别中文化；命令校验才要求勾选。
+- 验证：用户目标显示已卡住、6 条中文原因、恢复/重规划；run/pause 隐藏，job 行为空。
+
+## 2026-11-12 — K-D066：托管必须先停止聊天；失效审批不再报错
+- 问题：托管确认时聊天仍在生成，旧建议卡片与失效审批留在界面；点“拒绝”得到
+  `PermissionNotFoundError` 弹窗，看起来像操作失败。
+- 托管前：若会话 `running`，先确认并 `stop` → 轮询到非 running → 清理审批卡片、
+  把“执行中”工具标为“已中断”→ 再提取 Goal Draft；confirm 服务端仍有 409 守卫。
+- 建议卡片：会话已有 `objectiveId` 时不再渲染（SSE 回放也不会复活），顶部按钮改为
+  “打开托管目标”。
+- 审批：`ReplyPermission` 把上游 404 映射为 `ErrPermissionNotFound` → HTTP 404；
+  UI 收到 404 时移除卡片并提示“这条审批已失效”，其他错误才提示。
+- 启动：`ReconcileStale` 把上次进程遗留的 running 会话持久化为 interrupted，避免永久
+  “回复中”+ 死审批；回合属于当前进程，重启后不可能继续。
+- 状态收敛：任何非 running 状态都清理审批卡并标记未完成工具，不再只处理 interrupted/error。
+- 验证：真实会话重启后为已中断、0 审批、0 建议；伪造 404 拒绝无弹窗并移除卡片；
+  托管前调用顺序 stop → GET → handoff，审批清空、工具变已中断。
+
+## 2026-11-19 — K-D067：显式重规划、审查结论复用
+- 事故：驾驶舱“重新规划并继续”只是带 `--replan` 重跑；已有 blocked 任务时 recovery
+  先要求批准并立即退出，界面每 3s 刷新但状态不变，看起来像没反应。真正的重规划只在
+  运行循环内部、失败类别允许时发生。
+- 新增 `kernel goal replan` + `POST /api/objectives/{id}/replan`：仅 active/failed 且有
+  blocked/rejected；保留已通过任务，替换未完成任务，新任务必须用新 id；成功后 plan
+  vN+1 自动 confirmed、Objective 回到 active、清除 recovery pending；**不自动执行**。
+- 上限：自动 replan 仍 ≤5 个新任务；显式 replan 允许 ≤ 当前计划任务数（计划上限 20），
+  通过 `ValidateReplacementLimit` 参数化，不改自动路径语义。
+- 审查：同一 `reviewFingerprint` 已有同 kind 记录时不再调用 reviewer；blocking 则只阻塞
+  当前任务，clean 则跳过 reviewer 但仍跑 acceptance。`AddReview` 失败仅在用量为 0 时
+  全局停止，避免策略性拒绝把无关 pending 任务标成 “usage unknown”。
+- 报告：任务数只统计当前计划，superseded 单列；下一步文案改为“点开始执行即可开始调度”。
+- 验证：真实目标 v1 7 blocked → v2 4 pending；界面显示待执行、开始执行可见、恢复卡片消失；
+  命令级 fake 替换/无操作测试通过；模拟 UI 流程 POST replan 一次并显示完成文案。
+
+## 2026-11-19 — K-D068：聊天是控制面，驾驶舱/侧栏是监控面
+- 目标：托管链路的触发、提问、确认、审批、调整都在聊天窗口完成；侧栏只做监控。
+- 入口：建议卡片“开始规划”，或用户直接回复“可以开始规划”等短句。短句由客户端识别后走
+  控制路径 `POST /api/conversations/{id}/handoff/start`：消息落库但不产生额外模型回合。
+- 确认：Goal Draft 以会话流内联卡片呈现（不再是弹窗）；目标、执行预算（运行/审查/token）
+  直接可改，预算随 `goal_drafts.budget` 持久化。确认只创建目标+生成计划，不执行。
+- 监控/审批：会话底部 dock 显示“托管流程”卡片（目标→计划→审批→执行→验收→交付）、任务、
+  命令/高风险项与主行动；每 5s 从 `/api/objectives/{id}` + `/progress` 派生，不写第二套状态。
+  侧栏显示同样的步骤条与下一步。
+- 修改：未执行（planned、无任务）→ `POST /objectives/{id}/amend` 更新目标文本后
+  `POST /plan` 重新生成；已执行/卡住 → `POST /replan {instruction}` 只调整计划，不改目标文本，
+  避免与已验收证据冲突。
+- 状态表达：会话关联目标且不在生成中时隐藏聊天状态徽标，避免“已中断”与“待执行”同时出现；
+  审批 Tab 指向下方流程卡片。
+- 验证：草稿（25s）→ confirm（54s）→ planned 计划卡片；调整目标后 plan v2 生成，侧栏目标
+  文本同步；真实用户目标 v2 在 dock 显示待执行、T3b 命令校验与“批准并开始执行”。
+
+## 2026-11-19 — K-D069：撤回在没有远端消息时退化为本地回退
+- 事故：撤回弹 `openCode POST /fork: 404 MessageNotFoundError`，把本地 `msg_...` 当成
+  远端消息 ID，整段 provider JSON 直接弹窗。原因是旧用户消息的 remote_id 可能指向已被
+  重建/重启的会话，代码还回退到本地 ID。
+- 后端：`ForkSession` 把 404 `MessageNotFoundError` 映射为 `ErrForkMessageNotFound`；
+  `Rewind` 在消息无 remote_id、无 session 时直接本地回退；fork 404 时先返回 409
+  `rewind_local_only`，界面二次确认后以 `localOnly:true` 重试，才删除本地消息/事件
+  （`remoteForked:false`）。不再用本地 ID 当远端 ID；其他 fork 错误仍失败。
+- 前端：成功但未 fork 时提示“服务端上下文未回退”；不再弹 provider 原文。
+- 验证：无 remote_id/无 session 的会话真实撤回成功（removed=1，remoteForked=false）；
+  HTTP 404 映射与“其他错误不吞”均有测试。

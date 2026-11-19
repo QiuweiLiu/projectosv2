@@ -56,6 +56,16 @@ func FailureContext(st *store.Store, old goal.Plan) (string, []domain.TaskID, []
 
 // ValidateReplacement enforces the bounded-change rules before anything is written.
 func ValidateReplacement(old, new goal.Plan, accepted []string) error {
+	return ValidateReplacementLimit(old, new, accepted, MaxNewTasks)
+}
+
+// ValidateReplacementLimit is ValidateReplacement with an explicit cap on newly
+// added tasks. The automatic path always uses MaxNewTasks; an operator-requested
+// full replan may legitimately replace more unfinished work at once.
+func ValidateReplacementLimit(old, new goal.Plan, accepted []string, maxNew int) error {
+	if maxNew <= 0 {
+		maxNew = MaxNewTasks
+	}
 	if err := new.Validate(); err != nil {
 		return err
 	}
@@ -69,8 +79,8 @@ func ValidateReplacement(old, new goal.Plan, accepted []string) error {
 			added++
 		}
 	}
-	if added > MaxNewTasks {
-		return fmt.Errorf("replacement adds %d new tasks; limit is %d", added, MaxNewTasks)
+	if added > maxNew {
+		return fmt.Errorf("replacement adds %d new tasks; limit is %d", added, maxNew)
 	}
 	oldByID := map[string]goal.PlanTask{}
 	for _, t := range old.Tasks {

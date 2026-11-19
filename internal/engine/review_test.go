@@ -562,3 +562,64 @@ func TestQuarantineFileRoundTrip(t *testing.T) {
 		t.Fatal("quarantine file was not removed")
 	}
 }
+
+type perTaskReviewer struct {
+	requests []exec.ReviewRequest
+	blocking map[domain.TaskID]bool
+}
+
+func (s *perTaskReviewer) Review(_ context.Context, req exec.ReviewRequest) (engine.ReviewOutcome, error) {
+	s.requests = append(s.requests, req)
+	outcome := engine.ReviewOutcome{PromptChars: 100, OutputChars: 50}
+	if s.blocking[req.Task.ID] {
+		outcome.Findings = []domain.Finding{{Severity: domain.SeverityP1, Code: "bug", Message: "same defect"}}
+	}
+	return outcome, nil
+}
+
+func TestIdenticalRetryReusesRecordedReviewAndDoesNotPoisonOthers(t *testing.T) {
+	fake := exec.NewFake(1)
+	fake.Output["A"], fake.Output["B"] = "A-OK", "B-OK"
+	fake.Files = map[domain.TaskID][]string{"A": {"A.txt"}, "B": {"B.txt"}}
+	e, st := newEngine(t, fake, 2)
+	reviewer := &perTaskReviewer{blocking: map[domain.TaskID]bool{"A": true}}
+	e = e.WithReviewer(reviewer)
+	if err := e.Add(domain.Task{ID: "A", Prompt: "p", Validator: "exact:A", MaxAttempts: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Add(domain.Task{ID: "B", Prompt: "p", Validator: "exact:B", MaxAttempts: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Run(context.Background(), 50); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	// A: attempt 1 records a full review, attempt 2 a targeted one. Attempt 3
+	// reproduces the same artifact, so it must reuse the recorded verdict
+	// instead of calling the reviewer and then hitting the per-version limit.
+	callsA := 0
+	for _, req := range reviewer.requests {
+		if req.Task.ID == "A" {
+			callsA++
+		}
+	}
+	if callsA != 2 {
+		t.Fatalf("reviews for A = %d, want 2", callsA)
+	}
+	a, _, _ := st.Get("A")
+	if a.Status != domain.TaskBlocked {
+		t.Fatalf("A = %s, want blocked", a.Status)
+	}
+	if !strings.Contains(a.LastError, "artifact unchanged") {
+		t.Fatalf("A error = %q", a.LastError)
+	}
+	// An independent task must not become collateral damage of a review note.
+	b, _, _ := st.Get("B")
+	if b.Status != domain.TaskAccepted {
+		t.Fatalf("B = %s (%s), want accepted", b.Status, b.LastError)
+	}
+	for _, task := range []domain.Task{a, b} {
+		if strings.Contains(task.LastError, "usage unknown") {
+			t.Fatalf("%s poisoned with %q", task.ID, task.LastError)
+		}
+	}
+}

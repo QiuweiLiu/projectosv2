@@ -116,8 +116,10 @@ func Build(st *store.Store, obj goal.Objective) (Brief, error) {
 			brief.Blocked = append(brief.Blocked, line)
 		}
 	}
-	total := accepted + running + pending + blocked + superseded
-	brief.Progress = fmt.Sprintf("共 %d 个任务，%d 个已通过，%d 个执行中，%d 个待执行，%d 个被卡住。",
+	// Superseded tasks belong to earlier plan versions; counting them in the
+	// current plan would make a 4-task plan read as 11 tasks.
+	total := accepted + running + pending + blocked
+	brief.Progress = fmt.Sprintf("当前计划 %d 个任务，%d 个已通过，%d 个执行中，%d 个待执行，%d 个被卡住。",
 		total, accepted, running, pending, blocked)
 	if superseded > 0 {
 		brief.Progress += fmt.Sprintf("另有 %d 个旧任务已被替换。", superseded)
@@ -134,13 +136,13 @@ func Build(st *store.Store, obj goal.Objective) (Brief, error) {
 		brief.Next = "需要的话可以新建一个目标。"
 	case blocked > 0:
 		brief.Status = "执行中，但有任务被卡住。"
-		brief.Next = "系统会尝试一次有界重规划；也可以取消后重新发起。"
+		brief.Next = "用“重新规划”替换未完成任务，或用“批准恢复”重试单个任务；也可以取消后重新发起。"
 	case running > 0:
 		brief.Status = "正在执行。"
 		brief.Next = "等待当前任务完成；验收通过后会自动继续下游任务。"
 	default:
 		brief.Status = "等待执行。"
-		brief.Next = "确认计划后开始执行。"
+		brief.Next = "点“开始执行”即可开始调度；包含命令校验时仍需确认。"
 	}
 	return brief, nil
 }

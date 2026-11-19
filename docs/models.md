@@ -33,6 +33,37 @@ Workspace 模式下，`serve` 用 `KERNEL_MODELS_FILE` / `KERNEL_MODELS_CACHE` �
 `models.json` / `models-cache.json` 传给每个项目子进程；直接对项目目录运行 `goal` 时，
 也可以用这两个环境变量覆盖。
 
+聊天工作台右上角的“模型”下拉设置 `chat` 角色；旁边的“设置”打开各角色面板，
+可以分别设置 Chat / Planner / Worker / Reviewer / Acceptance / Reporter。列表来自缓存，
+“刷新列表”会重新执行 `opencode models`（遵循 `OPENCODE_BIN`）。列表为空时页面会自动刷新一次。
+Planner / Worker / Reviewer / Acceptance / Reporter 也可以在 Cockpit 的“模型”卡片里设置。
+
+刷新命令优先使用 `opencode models`；若失败再回退到 `opencode --standalone models`。
+插件激活偶尔较慢，命令会短暂重试；两次都拿不到模型时不会用空结果覆盖已有缓存。
+
+## 思考强度（variant）
+
+每个角色可以单独设置思考强度；它保存在 `models.json` 的 `variants`，运行时组合成
+OpenCode 原生的 `provider/model#variant`：
+
+```json
+{
+  "worker": "opencode-go/deepseek-v4.1-flash",
+  "variants": { "worker": "high", "reviewer": "max" }
+}
+```
+
+预设：`minimal` / `low` / `medium` / `high` / `max`（具体支持哪些由模型决定）。
+空值表示使用模型默认。回退规则与模型一致：
+
+- `reviewer` / `acceptance` 未单独设置模型时，跟随 `worker` 的 variant；
+- `chat` 未单独设置模型时跟随 `worker` 的 variant；
+- 显式设置了模型时，只使用该角色自己的 variant。
+
+聊天工作台的 variant 在**创建会话时**写入，修改后对新会话生效；已有会话继续使用原设置。
+CLI 可用 `kernel goal models --dir D --variant worker=high`，API 用
+`POST /api/models {"role":"worker","variant":"high"}`。
+
 ## 前提：harness 环境里真的注册了
 
 模型 id 只是字符串，不会自动带来凭据。用之前确认：

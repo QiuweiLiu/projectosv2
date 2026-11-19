@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"projectos/kernel/internal/chat"
 	"projectos/kernel/internal/conversation"
 	"projectos/kernel/internal/modelcfg"
+	"projectos/kernel/internal/opencodeserver"
 )
 
 func registerChatRoutes(mux *http.ServeMux, ctl *controlServer, mgr *chat.Manager, ws *workspace) {
@@ -88,6 +90,29 @@ func registerChatRoutes(mux *http.ServeMux, ctl *controlServer, mgr *chat.Manage
 			chatGet(w, r, mgr, id)
 		case r.Method == http.MethodPost && action == "messages":
 			chatSend(w, r, mgr, id)
+		case r.Method == http.MethodPost && action == "rewind":
+			var req struct {
+				MessageID string `json:"messageId"`
+				LocalOnly bool   `json:"localOnly"`
+			}
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+				http.Error(w, "bad json", http.StatusBadRequest)
+				return
+			}
+			res, err := mgr.Rewind(r.Context(), id, req.MessageID, req.LocalOnly)
+			if err != nil {
+				if errors.Is(err, chat.ErrRemoteGone) {
+					http.Error(w, "rewind_local_only", http.StatusConflict)
+					return
+				}
+				code := http.StatusBadRequest
+				if errors.Is(err, chat.ErrBusy) {
+					code = http.StatusConflict
+				}
+				http.Error(w, err.Error(), code)
+				return
+			}
+			_ = writeJSON(w, res)
 		case r.Method == http.MethodPost && action == "stop":
 			if err := mgr.Stop(r.Context(), id); err != nil {
 				http.Error(w, err.Error(), http.StatusConflict)
@@ -96,6 +121,30 @@ func registerChatRoutes(mux *http.ServeMux, ctl *controlServer, mgr *chat.Manage
 			_ = writeJSON(w, map[string]string{"status": "interrupted"})
 		case r.Method == http.MethodGet && action == "events":
 			chatEvents(w, r, mgr, id)
+		case r.Method == http.MethodGet && action == "forms":
+			forms, err := mgr.Forms(r.Context(), id)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			if forms == nil {
+				forms = []opencodeserver.Form{}
+			}
+			_ = writeJSON(w, map[string]any{"forms": forms})
+		case r.Method == http.MethodPost && strings.HasPrefix(action, "forms/"):
+			formID := strings.TrimPrefix(action, "forms/")
+			var req struct {
+				Answer map[string]any `json:"answer"`
+			}
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+				http.Error(w, "bad json", http.StatusBadRequest)
+				return
+			}
+			if err := mgr.ReplyForm(r.Context(), id, formID, req.Answer); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			_ = writeJSON(w, map[string]string{"status": "ok"})
 		case strings.HasPrefix(action, "handoff"):
 			chatHandoff(w, r, ctl, mgr, id, action, ws)
 		case r.Method == http.MethodPost && strings.HasPrefix(action, "permissions/"):
@@ -194,6 +243,10 @@ func chatPermission(w http.ResponseWriter, r *http.Request, mgr *chat.Manager, i
 		return
 	}
 	if err := mgr.ReplyPermission(r.Context(), id, requestID, req.Decision, req.Message); err != nil {
+		if errors.Is(err, opencodeserver.ErrPermissionNotFound) {
+			http.Error(w, "permission not found", http.StatusNotFound)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
@@ -274,6 +327,8 @@ func chatHandoff(w http.ResponseWriter, r *http.Request, ctl *controlServer, mgr
 			return
 		}
 		_ = writeJSON(w, d)
+	case rest == "start" && r.Method == http.MethodPost:
+		chatStartHandoff(w, r, mgr, conversationID)
 	case rest == "" && r.Method == http.MethodGet:
 		d, ok, err := mgr.LatestDraft(conversationID)
 		if err != nil {
@@ -310,11 +365,12 @@ func chatUpdateHandoff(w http.ResponseWriter, r *http.Request, mgr *chat.Manager
 		return
 	}
 	var req struct {
-		Goal            string   `json:"goal"`
-		Constraints     []string `json:"constraints"`
-		ExpectedOutputs []string `json:"expectedOutputs"`
-		Acceptance      []string `json:"acceptance"`
-		Decisions       []string `json:"decisions"`
+		Goal            string                    `json:"goal"`
+		Constraints     []string                  `json:"constraints"`
+		ExpectedOutputs []string                  `json:"expectedOutputs"`
+		Acceptance      []string                  `json:"acceptance"`
+		Decisions       []string                  `json:"decisions"`
+		Budget          *conversation.DraftBudget `json:"budget"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
@@ -329,6 +385,7 @@ func chatUpdateHandoff(w http.ResponseWriter, r *http.Request, mgr *chat.Manager
 	old.ExpectedOutputs = req.ExpectedOutputs
 	old.Acceptance = req.Acceptance
 	old.Decisions = req.Decisions
+	old.Budget = req.Budget
 	if err := mgr.UpdateDraft(old); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -336,7 +393,57 @@ func chatUpdateHandoff(w http.ResponseWriter, r *http.Request, mgr *chat.Manager
 	_ = writeJSON(w, old)
 }
 
+// chatStartHandoff turns a control phrase typed into the chat into a goal
+// draft: the message is kept in the transcript, and the draft wizard opens in
+// the stream instead of a modal.
+func chatStartHandoff(w http.ResponseWriter, r *http.Request, mgr *chat.Manager, conversationID string) {
+	var req struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil && err != io.EOF {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	text := strings.TrimSpace(req.Text)
+	if text == "" {
+		http.Error(w, "text is required", http.StatusBadRequest)
+		return
+	}
+	if len(text) > 500 {
+		http.Error(w, "text is too long", http.StatusBadRequest)
+		return
+	}
+	c, _, err := mgr.Get(r.Context(), conversationID, 1, "")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if c.Status == conversation.StatusRunning {
+		http.Error(w, "conversation is running; stop it before starting a handoff", http.StatusConflict)
+		return
+	}
+	if c.ObjectiveID != "" {
+		http.Error(w, "conversation already has an objective", http.StatusConflict)
+		return
+	}
+	msg, err := mgr.AppendUserNote(conversationID, text)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	d, err := mgr.DraftGoal(r.Context(), conversationID)
+	if err != nil {
+		http.Error(w, "goal draft: "+err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	_ = writeJSON(w, map[string]any{"message": msg, "draft": d})
+}
+
 func chatConfirmHandoff(w http.ResponseWriter, r *http.Request, ctl *controlServer, mgr *chat.Manager, conversationID, draftID string, ws *workspace) {
+	if c, _, err := mgr.Get(r.Context(), conversationID, 1, ""); err == nil && c.Status == conversation.StatusRunning {
+		http.Error(w, "conversation is running; stop it before confirming handoff", http.StatusConflict)
+		return
+	}
 	d, ok, err := mgr.GetDraft(draftID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -385,6 +492,6 @@ func chatConfirmHandoff(w http.ResponseWriter, r *http.Request, ctl *controlServ
 	ctl.set(objectiveID, map[bool]string{true: "plan failed", false: "planned"}[planErr != ""])
 	_ = writeJSON(w, map[string]any{
 		"objective": objectiveID, "status": "draft", "planGenerated": planErr == "",
-		"planError": planErr,
+		"planError": planErr, "budget": d.Budget,
 	})
 }

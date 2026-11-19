@@ -110,7 +110,7 @@ func resolveRoleModel(dir, role, explicit string) string {
 
 func cmdGoal(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: kernel goal <create|plan|show|confirm|run|status|progress|recover|metrics|export|resume|cancel|pause|unpause|report|explain|continue|models|prune> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: kernel goal <create|plan|show|confirm|run|replan|status|progress|recover|metrics|export|resume|cancel|pause|unpause|report|explain|continue|models|prune> [flags]")
 		return exitError
 	}
 	switch args[0] {
@@ -124,6 +124,8 @@ func cmdGoal(args []string) int {
 		return goalConfirm(args[1:])
 	case "run":
 		return goalRun(args[1:])
+	case "replan":
+		return goalReplan(args[1:])
 	case "status":
 		return goalStatus(args[1:])
 	case "progress":
@@ -247,6 +249,7 @@ func goalPlan(args []string) int {
 	executor := fs.String("executor", "opencode", "opencode | ao")
 	maxTasks := fs.Int("max-tasks", 8, "task limit")
 	projectContext := fs.String("context", "", "bounded project context for the planner")
+	instruction := fs.String("instruction", "", "operator instruction to include in the plan request")
 	if err := fs.Parse(args); err != nil {
 		return exitError
 	}
@@ -273,7 +276,9 @@ func goalPlan(args []string) int {
 
 	var p planner.Planner
 	if *which == "model" {
-		plannerModel := resolveRoleModel(*dir, "planner", *model)
+		plannerSettings := modelcfg.Load(*dir)
+		plannerModel := modelcfg.WithVariant(resolveRoleModel(*dir, "planner", *model),
+			plannerSettings.VariantFor("planner"))
 		fmt.Printf("planner model: %s\n", plannerModel)
 		backend, closeBackend, err := openSessionBackend(*dir, *executor, plannerModel)
 		if err != nil {
@@ -305,7 +310,7 @@ func goalPlan(args []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	plan, result, err := planner.Generate(ctx, p, planner.Request{Goal: obj.Goal, Constraints: obj.Constraints,
-		Expected: obj.ExpectedOutcome, MaxTasks: *maxTasks, Context: *projectContext}, 2) // no host path: the model plans relative to the task workspace
+		Expected: obj.ExpectedOutcome, Feedback: *instruction, MaxTasks: *maxTasks, Context: *projectContext}, 2) // no host path: the model plans relative to the task workspace
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "planner:", err)
 		return exitError
@@ -523,10 +528,13 @@ func goalRun(args []string) int {
 		return exitBlocked
 	}
 
-	workerModel := resolveRoleModel(*dir, "worker", *model)
 	settings := modelcfg.Load(*dir)
-	reviewerModel := firstNonEmpty(*reviewModel, settings.Reviewer, workerModel)
-	acceptanceModelResolved := firstNonEmpty(*acceptanceModel, settings.Acceptance, workerModel)
+	workerBase := resolveRoleModel(*dir, "worker", *model)
+	workerModel := modelcfg.WithVariant(workerBase, settings.VariantFor("worker"))
+	reviewerBase := firstNonEmpty(*reviewModel, settings.Reviewer, workerBase)
+	reviewerModel := modelcfg.WithVariant(reviewerBase, settings.VariantFor("reviewer"))
+	acceptanceBase := firstNonEmpty(*acceptanceModel, settings.Acceptance, workerBase)
+	acceptanceModelResolved := modelcfg.WithVariant(acceptanceBase, settings.VariantFor("acceptance"))
 	fmt.Printf("models: worker=%s reviewer=%s acceptance=%s\n", workerModel, reviewerModel, acceptanceModelResolved)
 
 	var backend exec.Backend
@@ -1459,7 +1467,10 @@ func goalReport(args []string) int {
 			return exitError
 		}
 		lock.Release()
-		backend, closeBackend, err := openSessionBackend(*dir, *executor, resolveRoleModel(*dir, "reporter", *model))
+		reporterSettings := modelcfg.Load(*dir)
+		reporterModel := modelcfg.WithVariant(resolveRoleModel(*dir, "reporter", *model),
+			reporterSettings.VariantFor("reporter"))
+		backend, closeBackend, err := openSessionBackend(*dir, *executor, reporterModel)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "backend:", err)
 			return exitError
@@ -1535,7 +1546,10 @@ func goalExplain(args []string) int {
 	}
 	lock.Release()
 
-	backend, closeBackend, err := openSessionBackend(*dir, *executor, resolveRoleModel(*dir, "reporter", *model))
+	explainSettings := modelcfg.Load(*dir)
+	explainModel := modelcfg.WithVariant(resolveRoleModel(*dir, "reporter", *model),
+		explainSettings.VariantFor("reporter"))
+	backend, closeBackend, err := openSessionBackend(*dir, *executor, explainModel)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "backend:", err)
 		return exitError
@@ -1652,7 +1666,10 @@ func goalContinue(args []string) int {
 		}
 		p = &planner.Fake{Plans: []goal.Plan{plan}}
 	} else {
-		backend, closeBackend, err := openSessionBackend(*dir, *executor, resolveRoleModel(*dir, "planner", *model))
+		replanSettings := modelcfg.Load(*dir)
+		replanModel := modelcfg.WithVariant(resolveRoleModel(*dir, "planner", *model),
+			replanSettings.VariantFor("planner"))
+		backend, closeBackend, err := openSessionBackend(*dir, *executor, replanModel)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "backend:", err)
 			return exitError
@@ -1740,6 +1757,8 @@ func goalModels(args []string) int {
 	dir := fs.String("dir", "", "state directory")
 	var sets stringList
 	fs.Var(&sets, "set", "role=model (repeatable; empty model clears)")
+	var variants stringList
+	fs.Var(&variants, "variant", "role=reasoning-effort (repeatable; empty clears)")
 	refresh := fs.Bool("refresh", false, "refresh the model list from the harness")
 	asJSON := fs.Bool("json", false, "print JSON")
 	if err := fs.Parse(args); err != nil {
@@ -1754,7 +1773,7 @@ func goalModels(args []string) int {
 		return exitError
 	}
 	if *refresh {
-		models, err := modelcfg.Refresh(context.Background(), *dir, "")
+		models, err := modelcfg.Refresh(context.Background(), *dir, opencodeBin())
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "refresh:", err)
 			return exitError
@@ -1775,7 +1794,20 @@ func goalModels(args []string) int {
 		}
 		settings = next
 	}
-	if len(sets) > 0 {
+	for _, pair := range variants {
+		role, variant, ok := strings.Cut(pair, "=")
+		if !ok {
+			fmt.Fprintf(os.Stderr, "expected role=variant, got %q\n", pair)
+			return exitError
+		}
+		next, err := settings.SetVariant(strings.TrimSpace(role), variant)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return exitError
+		}
+		settings = next
+	}
+	if len(sets) > 0 || len(variants) > 0 {
 		if err := modelcfg.Save(*dir, settings); err != nil {
 			fmt.Fprintln(os.Stderr, "models:", err)
 			return exitError

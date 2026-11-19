@@ -190,7 +190,8 @@ func TestGoalDraftLifecycle(t *testing.T) {
 	}
 	d, err := st.CreateGoalDraft(GoalDraft{ConversationID: c.ID, ProjectID: "proj-1",
 		Goal: "build a todo app", Constraints: []string{"no database"},
-		Acceptance: []string{"tests pass"}, SourceMessageIDs: []string{"m1", "m2"}, ContextVersion: "v1"})
+		Acceptance: []string{"tests pass"}, SourceMessageIDs: []string{"m1", "m2"}, ContextVersion: "v1",
+		Budget: &DraftBudget{MaxRuns: 6, MaxReviews: 4, MaxTokens: 250000}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,6 +205,9 @@ func TestGoalDraftLifecycle(t *testing.T) {
 	got, ok, err := st.LatestGoalDraft(c.ID)
 	if err != nil || !ok || got.Goal != "build a Python todo app" || len(got.Constraints) != 1 {
 		t.Fatalf("latest = %+v %v %v", got, ok, err)
+	}
+	if got.Budget == nil || got.Budget.MaxRuns != 6 || got.Budget.MaxReviews != 4 || got.Budget.MaxTokens != 250000 {
+		t.Fatalf("budget = %+v", got.Budget)
 	}
 	if err := st.ConfirmGoalDraft(d.ID, "obj-1"); err != nil {
 		t.Fatal(err)

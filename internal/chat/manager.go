@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"projectos/kernel/internal/conversation"
+	"projectos/kernel/internal/modelcfg"
 	"projectos/kernel/internal/opencodeserver"
 )
 
@@ -30,6 +31,7 @@ type Config struct {
 	Bin            string
 	Root           string // workspace root
 	DefaultModel   string
+	Variant        string // reasoning effort for the chat role
 	ProjectContext func(projectID, query string) string
 }
 
@@ -55,6 +57,7 @@ type Manager struct {
 	subs      map[string]map[*subscription]struct{}
 	sessions  map[string]string // opencode session -> conversation
 	active    map[string]bool
+	suggested sync.Map // conversation -> last assistant message considered
 	eventSeen int
 }
 
@@ -192,8 +195,14 @@ func (m *Manager) loadSessions() {
 
 // ensureSession creates an OpenCode session lazily. A conversation can sit in
 // the database without ever touching the runtime.
+const projectOSIdentity = `You are the ProjectOS assistant, running inside the ProjectOS desktop workspace.
+ProjectOS is a local AI work system for long-running objectives, tasks, approvals, evidence and recovery. You can chat, inspect a workspace (with permission), and help turn a long-running request into a managed Objective; the user confirms before an objective is created or executed.
+OpenCode is the underlying execution runtime. Do not describe yourself as OpenCode, and do not answer capability questions as if you were OpenCode; speak as the ProjectOS assistant.
+Be concise and accurate. Never claim work is complete without evidence. Ask before destructive or irreversible actions.`
+
 func (m *Manager) ensureSession(ctx context.Context, srv *opencodeserver.Server, c conversation.Conversation) (string, error) {
 	if c.SessionID != "" {
+		_ = srv.SetInstruction(ctx, c.SessionID, "projectos", projectOSIdentity)
 		return c.SessionID, nil
 	}
 	dir := c.Dir
@@ -210,10 +219,15 @@ func (m *Manager) ensureSession(ctx context.Context, srv *opencodeserver.Server,
 	if title == "" {
 		title = "ProjectOS chat"
 	}
-	sess, err := srv.CreateSession(ctx, title, c.Model, dir)
+	model := c.Model
+	if strings.TrimSpace(model) == "" {
+		model = m.cfg.DefaultModel
+	}
+	sess, err := srv.CreateSession(ctx, title, modelcfg.WithVariant(model, m.cfg.Variant), dir)
 	if err != nil {
 		return "", err
 	}
+	_ = srv.SetInstruction(ctx, sess.ID, "projectos", projectOSIdentity)
 	if err := m.store.SetSession(c.ID, sess.ID); err != nil {
 		return "", err
 	}
@@ -221,6 +235,32 @@ func (m *Manager) ensureSession(ctx context.Context, srv *opencodeserver.Server,
 	m.sessions[sess.ID] = c.ID
 	m.mu.Unlock()
 	return sess.ID, nil
+}
+
+// AppendUserNote stores a user message without starting a model turn. Control
+// phrases such as "可以开始规划" are part of the transcript, but the action they
+// trigger is served by the kernel, not by the chat model.
+func (m *Manager) AppendUserNote(id, text string) (conversation.Message, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return conversation.Message{}, fmt.Errorf("message is empty")
+	}
+	c, ok, err := m.store.Get(id)
+	if err != nil {
+		return conversation.Message{}, err
+	}
+	if !ok {
+		return conversation.Message{}, fmt.Errorf("unknown conversation")
+	}
+	if c.Status == conversation.StatusRunning {
+		return conversation.Message{}, ErrBusy
+	}
+	msg, err := m.store.AppendMessage(id, "user", text)
+	if err != nil {
+		return conversation.Message{}, err
+	}
+	_, _ = m.persist(id, "user", map[string]string{"text": text, "messageId": msg.ID})
+	return msg, nil
 }
 
 func (m *Manager) Send(ctx context.Context, id, text string) (conversation.Message, error) {
@@ -498,6 +538,12 @@ func (m *Manager) handle(ev opencodeserver.Event) {
 		// Deltas are live-only; persisting every token would turn the event log
 		// into an unbounded write amplifier. The final text is stored below.
 		m.publishLive(convID, "text_delta", map[string]string{"delta": base.Delta})
+	case "session.reasoning.started":
+		m.publishLive(convID, "reasoning_started", map[string]string{"messageId": base.AssistantMessageID})
+	case "session.reasoning.delta":
+		m.publishLive(convID, "reasoning_delta", map[string]string{"delta": base.Delta})
+	case "session.reasoning.ended":
+		m.publishLive(convID, "reasoning_ended", map[string]string{"text": base.Text})
 	case "session.text.ended":
 		if strings.TrimSpace(base.Text) == "" {
 			return
@@ -511,6 +557,9 @@ func (m *Manager) handle(ev opencodeserver.Event) {
 		}
 		_ = m.store.PruneMessages(convID, 1000)
 		_, _ = m.persist(convID, "assistant", map[string]string{"text": base.Text, "messageId": base.AssistantMessageID})
+		if strings.TrimSpace(base.Text) != "" {
+			go m.SuggestObjective(context.Background(), convID, base.AssistantMessageID)
+		}
 	case "session.tool.called":
 		_, _ = m.persist(convID, "tool", map[string]any{"id": base.ID, "name": base.Name, "input": base.Input})
 	case "session.tool.success":
@@ -543,6 +592,29 @@ func (m *Manager) setIdle(id string, status conversation.Status, errText string)
 	m.mu.Unlock()
 	_ = m.store.SetStatus(id, status, errText)
 	_, _ = m.persist(id, "status", map[string]string{"status": string(status), "error": errText})
+}
+
+// ReconcileStale clears in-flight statuses left behind by a previous kernel
+// process. A turn lives in this process, so a conversation persisted as running
+// at startup can never finish; without this the UI shows "回复中" forever and
+// keeps offering permission cards that no longer exist upstream.
+func (m *Manager) ReconcileStale() int {
+	list, err := m.store.List(200)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, c := range list {
+		if c.Status != conversation.StatusRunning {
+			continue
+		}
+		_ = m.store.SetStatus(c.ID, conversation.StatusInterrupted, "")
+		_, _ = m.persist(c.ID, "status", map[string]string{
+			"status": string(conversation.StatusInterrupted), "reason": "kernel restarted",
+		})
+		n++
+	}
+	return n
 }
 
 // Sync repairs a missed final message after the desktop app or event stream was

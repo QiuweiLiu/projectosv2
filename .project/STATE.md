@@ -36,6 +36,46 @@ Kernel 仍是 Task/Run/Evidence/Review 唯一权威；没有第二套 Scheduler 
   状态标签、Markdown、欢迎态、深链、证据 Tab、审批复位、IME 回车等）。截图见 HANDOFF。
 - **OPENCODE_BIN**：planner/worker/reviewer/acceptance 现与聊天共用该变量（`goal.go`），
   回归测试 `TestOpencodeBinHonoursEnvironment`；PATH 仍为 v1.18.15 时 planner 实测成功。
+- **多工作区标签**：每标签独立 serve 端口与 WKWebView，同时保活；关闭标签只停自身服务，
+  退出停自己启动的服务；偏好持久化；`--check-multi` 与 `--dump-tabs` 已验证。
+- **显式重新规划**：`kernel goal replan` + `POST /api/objectives/{id}/replan` 保留已通过任务、
+  替换 blocked/pending 任务、升到 plan vN+1 并回到 active；真实目标已从 7 blocked 变为
+  4 pending（v2），7 个旧任务 superseded；命令级 fake 测试覆盖替换与无操作两条路径。
+- **聊天内托管**：建议卡片/短句“可以开始规划”→ `POST /handoff/start`（消息入对话、不产生
+  额外回合）→ 会话流内联草稿（目标/预算/约束/产物/验收）→ 创建目标+计划 → 底部“托管流程”
+  dock（步骤/任务/命令审批/开始/恢复/重新规划/取消）+ 侧栏同步骤与下一步；5s 轮询目标状态。
+  未执行目标可“调整目标”（amend + plan），已执行/卡住可带 instruction 重新规划。
+- **撤回降级**：消息无远端 ID/无 session 直接本地回退；fork 404 先返回 409
+  `rewind_local_only`，二次确认后以 `localOnly:true` 只删本地并提示上下文未回退；不再把
+  本地 `msg_` 当远端 ID。
+- **审查预算修复**：同一产物版本重试不再重复调用 reviewer，直接复用已记录结论；审查落库
+  失败仅在用量确实未知时才全局停止，已知用量的策略性拒绝只阻塞当前任务。新增
+  `TestIdenticalRetryReusesRecordedReviewAndDoesNotPoisonOthers`。
+- **模型选择**：聊天头部“设置”提供 6 角色下拉与思考强度（`#variant`）；空缓存自动刷新；
+  `goal models --refresh` 遵循 `OPENCODE_BIN`，空结果不写缓存；实测 159 项。
+- **思考强度**：`variants` 写入 models.json；reviewer/acceptance 跟随 worker 的回退规则；
+  聊天新会话生效；OpenCode server 已验证接受 variant。
+- **聊天界面**：用户消息右对齐；等待/工具间隙“正在思考”动画；思考过程折叠块；
+  1440 截图与 SSE 注入验证。
+- **托管建议**：每轮后由聊天模型判断，命中写 `handoff_suggestion`（0.95 实测），
+  刷新可回放；确认面板改为目标+流程+摘要卡片，Goal 使用用户语言。
+- **撤回消息**：fork 模型会话到目标消息前，删除其后消息/事件并恢复输入；文件与 Task 不回滚。
+  实测 API 删除 2 条、Session 更换、UI 输入恢复。
+- **中断收尾**：interrupted/error 清理失效审批、提示无最终回答，提供重新编辑/继续。
+- **对话控制**：思考过程默认展开、输入区可切换并持久化；生成中输入区/思考行可停止；
+  question 工具通过 OpenCode form 渲染并提交答案，解决等待问题时的卡住。
+- **桌面对话框**：WKWebView 接入 `WKUIDelegate`；confirm/alert/prompt 不再静默失败。
+- **身份与排版**：Session 注入 ProjectOS instruction；块级 Markdown/表格/浅色代码/
+  Claude 风格行距、柔和动效；空闲后无残留思考动画。
+- **驾驶舱状态**：派生执行中/已卡住/待执行；卡住时隐藏开始执行，显示任务级原因与
+  恢复/重规划动作；原始错误与重复小字移除。
+- **托管一致性**：托管前先停止生成并清审批；已托管会话不再显示建议卡，按钮改
+  “打开托管目标”；启动时把遗留 running 会话改为 interrupted；审批 404 内联提示。
+- **桌面环境**：外壳自动发现 OpenCode Desktop CLI 并注入 `OPENCODE_BIN`；
+  `env -i PATH=/usr/bin:/bin --check-models` 通过（Finder 短 PATH 场景）。
+- **异步标签 + iCloud**：窗口先开，标签各自准备；未下载目录会请求 iCloud 下载并显示状态，
+  完成后自动启动；失败可重试。实测 `Documents/测试` 下载完成并启动 8800。
+  `RunKernel` 20s 超时；端口最多 5 个。
 
 ## Capabilities
 - Objective/Plan/Task/Run 状态机、DAG 并发、SQLite 单写者、事务性结算。

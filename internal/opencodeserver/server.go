@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -48,6 +49,33 @@ type Session struct {
 	Title string `json:"title"`
 }
 
+type FormOption struct {
+	Value       string `json:"value"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+type FormField struct {
+	Key         string       `json:"key"`
+	Type        string       `json:"type"`
+	Title       string       `json:"title,omitempty"`
+	Description string       `json:"description,omitempty"`
+	Required    bool         `json:"required,omitempty"`
+	Options     []FormOption `json:"options,omitempty"`
+	Default     any          `json:"default,omitempty"`
+	MinItems    *int         `json:"minItems,omitempty"`
+	MaxItems    *int         `json:"maxItems,omitempty"`
+	Custom      bool         `json:"custom,omitempty"`
+}
+
+type Form struct {
+	ID        string          `json:"id"`
+	SessionID string          `json:"sessionID"`
+	Title     string          `json:"title"`
+	Fields    []FormField     `json:"fields"`
+	State     json.RawMessage `json:"state,omitempty"`
+}
+
 type Message struct {
 	ID   string `json:"id"`
 	Type string `json:"type"`
@@ -85,9 +113,9 @@ type Event struct {
 	} `json:"durable"`
 }
 
-// ChatEventTypes is the minimum subscription for a chat workspace: text deltas,
-// tool state, execution state and permission requests. It intentionally omits
-// token-level reasoning and unrelated server events.
+// ChatEventTypes is the minimum subscription for a chat workspace: text and
+// reasoning deltas, tool state, execution state and permission requests. It
+// omits unrelated server events.
 var ChatEventTypes = []string{
 	"session.execution.started",
 	"session.execution.succeeded",
@@ -96,6 +124,9 @@ var ChatEventTypes = []string{
 	"session.text.started",
 	"session.text.delta",
 	"session.text.ended",
+	"session.reasoning.started",
+	"session.reasoning.delta",
+	"session.reasoning.ended",
 	"session.tool.called",
 	"session.tool.success",
 	"session.tool.failed",
@@ -258,6 +289,20 @@ func (s *Server) Stop() {
 	}
 }
 
+// HTTPError keeps the upstream status code so callers can react to 404 (gone)
+// without string matching a formatted message.
+type HTTPError struct {
+	StatusCode int
+	Method     string
+	Path       string
+	Status     string
+	Body       string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("opencode %s %s: %s: %s", e.Method, e.Path, e.Status, e.Body)
+}
+
 func (s *Server) doJSON(ctx context.Context, method, path string, body, out any) error {
 	var reader io.Reader
 	if body != nil {
@@ -283,7 +328,8 @@ func (s *Server) doJSON(ctx context.Context, method, path string, body, out any)
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("opencode %s %s: %s: %s", method, path, resp.Status, clip(string(raw), 500))
+		return &HTTPError{StatusCode: resp.StatusCode, Method: method, Path: path,
+			Status: resp.Status, Body: clip(string(raw), 500)}
 	}
 	if out != nil {
 		if err := json.Unmarshal(raw, out); err != nil {
@@ -295,11 +341,24 @@ func (s *Server) doJSON(ctx context.Context, method, path string, body, out any)
 
 func parseModel(ref string) (map[string]string, error) {
 	ref = strings.TrimSpace(ref)
-	provider, id, ok := strings.Cut(ref, "/")
-	if !ok || provider == "" || id == "" {
+	provider, rest, ok := strings.Cut(ref, "/")
+	if !ok || provider == "" || rest == "" {
 		return nil, fmt.Errorf("model %q must be provider/model", ref)
 	}
-	return map[string]string{"providerID": provider, "id": id}, nil
+	id, variant, hasVariant := strings.Cut(rest, "#")
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, fmt.Errorf("model %q must be provider/model", ref)
+	}
+	model := map[string]string{"providerID": provider, "id": id}
+	if hasVariant {
+		variant = strings.TrimSpace(variant)
+		if variant == "" {
+			return nil, fmt.Errorf("model %q has an empty variant", ref)
+		}
+		model["variant"] = variant
+	}
+	return model, nil
 }
 
 func (s *Server) CreateSession(ctx context.Context, title, model, dir string) (Session, error) {
@@ -322,6 +381,57 @@ func (s *Server) CreateSessionWithPolicy(ctx context.Context, title, model, dir 
 		"permissions": permissions,
 	}, &out)
 	return out.Data, err
+}
+
+// ForkSession creates a child session that copies the projected history before
+// the given message. The old session is left untouched.
+// ErrForkMessageNotFound reports a fork target the server no longer knows:
+// the session was recreated, or the message never reached OpenCode.
+var ErrForkMessageNotFound = errors.New("fork message not found")
+
+func (s *Server) ForkSession(ctx context.Context, sessionID, before string) (Session, error) {
+	var out struct {
+		Data Session `json:"data"`
+	}
+	body := map[string]any{"before": before}
+	if err := s.doJSON(ctx, http.MethodPost,
+		"/api/session/"+url.PathEscape(sessionID)+"/fork", body, &out); err != nil {
+		var he *HTTPError
+		if errors.As(err, &he) && he.StatusCode == http.StatusNotFound &&
+			(strings.Contains(he.Body, "MessageNotFound") || strings.Contains(strings.ToLower(he.Body), "message not found")) {
+			return Session{}, ErrForkMessageNotFound
+		}
+		return Session{}, err
+	}
+	return out.Data, nil
+}
+
+// ListForms returns pending (and recent) forms attached to a session. The
+// question tool uses these forms to ask the user for choices.
+func (s *Server) ListForms(ctx context.Context, sessionID string) ([]Form, error) {
+	var out struct {
+		Data []Form `json:"data"`
+	}
+	if err := s.doJSON(ctx, http.MethodGet,
+		"/api/session/"+url.PathEscape(sessionID)+"/form", nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Data, nil
+}
+
+// ReplyForm submits one answer map keyed by FormField.Key.
+func (s *Server) ReplyForm(ctx context.Context, sessionID, formID string, answer map[string]any) error {
+	body := map[string]any{"answer": answer}
+	return s.doJSON(ctx, http.MethodPost,
+		"/api/session/"+url.PathEscape(sessionID)+"/form/"+url.PathEscape(formID)+"/reply", body, nil)
+}
+
+// SetInstruction attaches a durable instruction entry to a session. The
+// question is announced to the model at the next step boundary.
+func (s *Server) SetInstruction(ctx context.Context, sessionID, key string, value any) error {
+	return s.doJSON(ctx, http.MethodPut,
+		"/api/experimental/session/"+url.PathEscape(sessionID)+"/instructions/entries/"+url.PathEscape(key),
+		map[string]any{"value": value}, nil)
 }
 
 // Prompt sends a user message and returns the provider message id. The caller
@@ -385,13 +495,23 @@ func (s *Server) Interrupt(ctx context.Context, sessionID string) error {
 	return s.doJSON(ctx, http.MethodPost, "/api/session/"+url.PathEscape(sessionID)+"/interrupt", nil, nil)
 }
 
+// ErrPermissionNotFound reports a reply to a permission request the server no
+// longer knows about: it expired, was answered elsewhere, or the session was
+// replaced. Callers should drop the stale prompt instead of retrying.
+var ErrPermissionNotFound = errors.New("permission not found")
+
 func (s *Server) ReplyPermission(ctx context.Context, sessionID, requestID, decision, message string) error {
 	body := map[string]any{"decision": decision}
 	if message != "" {
 		body["message"] = message
 	}
-	return s.doJSON(ctx, http.MethodPost,
+	err := s.doJSON(ctx, http.MethodPost,
 		"/api/session/"+url.PathEscape(sessionID)+"/permission/"+url.PathEscape(requestID)+"/reply", body, nil)
+	var he *HTTPError
+	if errors.As(err, &he) && he.StatusCode == http.StatusNotFound {
+		return ErrPermissionNotFound
+	}
+	return err
 }
 
 type EventStream struct {

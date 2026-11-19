@@ -51,20 +51,30 @@ type Message struct {
 	CreatedAt      time.Time `json:"createdAt"`
 }
 
+// DraftBudget carries the execution limits the operator set while confirming a
+// handoff. It is stored with the draft so a later "start execution" from chat
+// uses the numbers the operator actually saw.
+type DraftBudget struct {
+	MaxRuns    int `json:"maxRuns,omitempty"`
+	MaxReviews int `json:"maxReviews,omitempty"`
+	MaxTokens  int `json:"maxTokens,omitempty"`
+}
+
 type GoalDraft struct {
-	ID               string    `json:"id"`
-	ConversationID   string    `json:"conversationId"`
-	ProjectID        string    `json:"projectId,omitempty"`
-	Goal             string    `json:"goal"`
-	Constraints      []string  `json:"constraints,omitempty"`
-	ExpectedOutputs  []string  `json:"expectedOutputs,omitempty"`
-	Acceptance       []string  `json:"acceptance,omitempty"`
-	Decisions        []string  `json:"decisions,omitempty"`
-	SourceMessageIDs []string  `json:"sourceMessageIds,omitempty"`
-	ContextVersion   string    `json:"contextVersion,omitempty"`
-	Status           string    `json:"status"` // draft | confirmed
-	CreatedAt        time.Time `json:"createdAt"`
-	UpdatedAt        time.Time `json:"updatedAt"`
+	ID               string       `json:"id"`
+	ConversationID   string       `json:"conversationId"`
+	ProjectID        string       `json:"projectId,omitempty"`
+	Goal             string       `json:"goal"`
+	Constraints      []string     `json:"constraints,omitempty"`
+	ExpectedOutputs  []string     `json:"expectedOutputs,omitempty"`
+	Acceptance       []string     `json:"acceptance,omitempty"`
+	Decisions        []string     `json:"decisions,omitempty"`
+	SourceMessageIDs []string     `json:"sourceMessageIds,omitempty"`
+	ContextVersion   string       `json:"contextVersion,omitempty"`
+	Budget           *DraftBudget `json:"budget,omitempty"`
+	Status           string       `json:"status"` // draft | confirmed
+	CreatedAt        time.Time    `json:"createdAt"`
+	UpdatedAt        time.Time    `json:"updatedAt"`
 }
 
 type Event struct {
@@ -123,6 +133,7 @@ CREATE TABLE IF NOT EXISTS goal_drafts (
 	decisions          TEXT NOT NULL DEFAULT '[]',
 	source_message_ids TEXT NOT NULL DEFAULT '[]',
 	context_version    TEXT NOT NULL DEFAULT '',
+	budget             TEXT NOT NULL DEFAULT '{}',
 	status             TEXT NOT NULL DEFAULT 'draft',
 	created_at         TEXT NOT NULL,
 	updated_at         TEXT NOT NULL
@@ -156,6 +167,10 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if err := migrateMessages(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := migrateGoalDrafts(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -231,6 +246,37 @@ func migrateMessages(db *sql.DB) error {
 	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_remote
 		ON messages(conversation_id, remote_id) WHERE remote_id <> ''`)
 	return err
+}
+
+func migrateGoalDrafts(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(goal_drafts)`)
+	if err != nil {
+		return err
+	}
+	haveBudget := false
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "budget" {
+			haveBudget = true
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !haveBudget {
+		if _, err := db.Exec(`ALTER TABLE goal_drafts ADD COLUMN budget TEXT NOT NULL DEFAULT '{}'`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }
@@ -524,6 +570,119 @@ func (s *Store) Messages(conversationID string, limit int, before string) ([]Mes
 	return out, rows.Err()
 }
 
+// MessageByID resolves a local or remote message id.
+func (s *Store) MessageByID(conversationID, id string) (Message, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	row := s.db.QueryRow(`SELECT id,conversation_id,remote_id,role,text,created_at
+		FROM messages WHERE conversation_id=? AND (id=? OR remote_id=?)
+		ORDER BY rowid DESC LIMIT 1`, conversationID, id, id)
+	var m Message
+	var created string
+	if err := row.Scan(&m.ID, &m.ConversationID, &m.RemoteID, &m.Role, &m.Text, &created); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Message{}, false, nil
+		}
+		return Message{}, false, err
+	}
+	m.CreatedAt = parseTime(created)
+	return m, true, nil
+}
+
+// Rewind deletes a user message and everything after it, together with the
+// conversation events that would replay those messages. Callers must fork the
+// model session before calling this, so the model context is rolled back too.
+func (s *Store) Rewind(conversationID, messageID string) (Message, []Message, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Message{}, nil, err
+	}
+	defer tx.Rollback()
+
+	var rowID int64
+	var target Message
+	var created string
+	err = tx.QueryRow(`SELECT rowid,id,conversation_id,remote_id,role,text,created_at
+		FROM messages WHERE conversation_id=? AND (id=? OR remote_id=?)
+		ORDER BY rowid DESC LIMIT 1`, conversationID, messageID, messageID).
+		Scan(&rowID, &target.ID, &target.ConversationID, &target.RemoteID, &target.Role, &target.Text, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Message{}, nil, fmt.Errorf("message not found")
+	}
+	if err != nil {
+		return Message{}, nil, err
+	}
+	target.CreatedAt = parseTime(created)
+	if target.Role != "user" {
+		return Message{}, nil, fmt.Errorf("rewind must start at a user message")
+	}
+
+	rows, err := tx.Query(`SELECT id,conversation_id,remote_id,role,text,created_at
+		FROM messages WHERE conversation_id=? AND rowid>=? ORDER BY rowid`, conversationID, rowID)
+	if err != nil {
+		return Message{}, nil, err
+	}
+	var removed []Message
+	for rows.Next() {
+		var m Message
+		var at string
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.RemoteID, &m.Role, &m.Text, &at); err != nil {
+			rows.Close()
+			return Message{}, nil, err
+		}
+		m.CreatedAt = parseTime(at)
+		removed = append(removed, m)
+	}
+	rows.Close()
+
+	// Drop the persisted events that produced this turn. If the user event was
+	// already pruned, drop the whole event log: replaying old turns after a
+	// rewind is worse than losing old tool cards.
+	cutoff := int64(0)
+	evRows, err := tx.Query(`SELECT seq,kind,data FROM events WHERE conversation_id=? ORDER BY seq`, conversationID)
+	if err != nil {
+		return Message{}, nil, err
+	}
+	for evRows.Next() {
+		var seq int64
+		var kind, data string
+		if err := evRows.Scan(&seq, &kind, &data); err != nil {
+			evRows.Close()
+			return Message{}, nil, err
+		}
+		if kind != "user" {
+			continue
+		}
+		var payload struct {
+			MessageID string `json:"messageId"`
+		}
+		if json.Unmarshal([]byte(data), &payload) == nil && payload.MessageID == target.ID {
+			cutoff = seq
+			break
+		}
+	}
+	evRows.Close()
+	if cutoff > 0 {
+		if _, err := tx.Exec(`DELETE FROM events WHERE conversation_id=? AND seq>=?`, conversationID, cutoff); err != nil {
+			return Message{}, nil, err
+		}
+	} else {
+		if _, err := tx.Exec(`DELETE FROM events WHERE conversation_id=?`, conversationID); err != nil {
+			return Message{}, nil, err
+		}
+	}
+	if _, err := tx.Exec(`DELETE FROM messages WHERE conversation_id=? AND rowid>=?`, conversationID, rowID); err != nil {
+		return Message{}, nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Message{}, nil, err
+	}
+	return target, removed, nil
+}
+
 func (s *Store) AppendEvent(conversationID, kind string, data any) (Event, error) {
 	raw, err := json.Marshal(data)
 	if err != nil {
@@ -580,11 +739,11 @@ func (s *Store) CreateGoalDraft(d GoalDraft) (GoalDraft, error) {
 	raw := func(v any) string { b, _ := json.Marshal(v); return string(b) }
 	_, err := s.db.Exec(`INSERT INTO goal_drafts
 		(id,conversation_id,project_id,goal,constraints,expected_outputs,acceptance,decisions,
-		 source_message_ids,context_version,status,created_at,updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 source_message_ids,context_version,budget,status,created_at,updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		d.ID, d.ConversationID, d.ProjectID, d.Goal, raw(d.Constraints), raw(d.ExpectedOutputs),
-		raw(d.Acceptance), raw(d.Decisions), raw(d.SourceMessageIDs), d.ContextVersion, d.Status,
-		d.CreatedAt.Format(time.RFC3339Nano), d.UpdatedAt.Format(time.RFC3339Nano))
+		raw(d.Acceptance), raw(d.Decisions), raw(d.SourceMessageIDs), d.ContextVersion, raw(d.Budget),
+		d.Status, d.CreatedAt.Format(time.RFC3339Nano), d.UpdatedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		return GoalDraft{}, err
 	}
@@ -614,12 +773,12 @@ func (s *Store) LatestGoalDraft(conversationID string) (GoalDraft, bool, error) 
 
 func (s *Store) getDraftLocked(id string) (GoalDraft, bool, error) {
 	var d GoalDraft
-	var constraints, expected, acceptance, decisions, sources, created, updated string
+	var constraints, expected, acceptance, decisions, sources, budget, created, updated string
 	err := s.db.QueryRow(`SELECT id,conversation_id,project_id,goal,constraints,expected_outputs,
-		acceptance,decisions,source_message_ids,context_version,status,created_at,updated_at
+		acceptance,decisions,source_message_ids,context_version,budget,status,created_at,updated_at
 		FROM goal_drafts WHERE id=?`, id).Scan(
 		&d.ID, &d.ConversationID, &d.ProjectID, &d.Goal, &constraints, &expected, &acceptance,
-		&decisions, &sources, &d.ContextVersion, &d.Status, &created, &updated)
+		&decisions, &sources, &d.ContextVersion, &budget, &d.Status, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return GoalDraft{}, false, nil
 	}
@@ -631,6 +790,12 @@ func (s *Store) getDraftLocked(id string) (GoalDraft, bool, error) {
 	_ = json.Unmarshal([]byte(acceptance), &d.Acceptance)
 	_ = json.Unmarshal([]byte(decisions), &d.Decisions)
 	_ = json.Unmarshal([]byte(sources), &d.SourceMessageIDs)
+	if budget != "" && budget != "null" {
+		var b DraftBudget
+		if json.Unmarshal([]byte(budget), &b) == nil {
+			d.Budget = &b
+		}
+	}
 	d.CreatedAt, d.UpdatedAt = parseTime(created), parseTime(updated)
 	return d, true, nil
 }
@@ -640,9 +805,9 @@ func (s *Store) UpdateGoalDraft(d GoalDraft) error {
 	defer s.mu.Unlock()
 	raw := func(v any) string { b, _ := json.Marshal(v); return string(b) }
 	res, err := s.db.Exec(`UPDATE goal_drafts SET goal=?,constraints=?,expected_outputs=?,acceptance=?,
-		decisions=?,source_message_ids=?,context_version=?,updated_at=? WHERE id=? AND status='draft'`,
+		decisions=?,source_message_ids=?,context_version=?,budget=?,updated_at=? WHERE id=? AND status='draft'`,
 		d.Goal, raw(d.Constraints), raw(d.ExpectedOutputs), raw(d.Acceptance), raw(d.Decisions),
-		raw(d.SourceMessageIDs), d.ContextVersion, now(), d.ID)
+		raw(d.SourceMessageIDs), d.ContextVersion, raw(d.Budget), now(), d.ID)
 	if err != nil {
 		return err
 	}

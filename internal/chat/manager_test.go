@@ -255,3 +255,65 @@ func TestContextVersionIsQueryIndependent(t *testing.T) {
 		t.Fatalf("versions = %q %q", version1, version2)
 	}
 }
+
+func TestReconcileStaleClearsRunningLeftByPreviousProcess(t *testing.T) {
+	m, st, c := testManager(t)
+	if err := st.SetStatus(c.ID, conversation.StatusRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	if n := m.ReconcileStale(); n != 1 {
+		t.Fatalf("reconciled = %d, want 1", n)
+	}
+	got, ok, err := st.Get(c.ID)
+	if err != nil || !ok || got.Status != conversation.StatusInterrupted {
+		t.Fatalf("conversation = %+v %v %v", got, ok, err)
+	}
+	if n := m.ReconcileStale(); n != 0 {
+		t.Fatalf("second pass reconciled = %d, want 0", n)
+	}
+	events, err := st.EventsAfter(c.ID, 0, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, ev := range events {
+		if ev.Kind == "status" && strings.Contains(string(ev.Data), "kernel restarted") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing status event: %+v", events)
+	}
+}
+
+func TestRewindWithoutRemoteIDFallsBackToLocalOnly(t *testing.T) {
+	m, st, c := testManager(t)
+	user, err := st.AppendMessage(c.ID, "user", "撤回到这里")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AppendMessage(c.ID, "assistant", "之后的回答"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := m.Rewind(context.Background(), c.ID, user.ID, false)
+	if err != nil {
+		t.Fatalf("rewind: %v", err)
+	}
+	if res.RestoredText != "撤回到这里" || res.Removed != 2 {
+		t.Fatalf("result = %+v", res)
+	}
+	if res.RemoteForked {
+		t.Fatalf("a message without a remote id must not be forked: %+v", res)
+	}
+	if res.Session != "ses_1" {
+		t.Fatalf("session changed to %q", res.Session)
+	}
+	msgs, err := st.Messages(c.ID, 10, "")
+	if err != nil || len(msgs) != 0 {
+		t.Fatalf("messages = %+v %v", msgs, err)
+	}
+	got, _, _ := st.Get(c.ID)
+	if got.Status != conversation.StatusIdle {
+		t.Fatalf("status = %s", got.Status)
+	}
+}

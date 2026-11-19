@@ -92,3 +92,39 @@ func TestTasksForPlanIncludesCarriedAcceptedTasks(t *testing.T) {
 		t.Fatalf("tasks = %+v, want the accepted T1 to remain a member", tasks)
 	}
 }
+
+func TestAmendObjectiveOnlyBeforeExecution(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.CreateObjective(goal.Objective{ID: "obj-1", Goal: "old goal", Status: goal.StatusPlanned,
+		PlanVersion: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AmendObjective("obj-1", "new title", "new goal", "c", "e", "a"); err != nil {
+		t.Fatalf("amend planned objective: %v", err)
+	}
+	got, _, _ := st.GetObjective("obj-1")
+	if got.Goal != "new goal" || got.Title != "new title" || got.Constraints != "c" {
+		t.Fatalf("objective = %+v", got)
+	}
+	if err := st.CreateTask(domain.Task{ID: "T1", Prompt: "p", ArtifactPath: "a.txt", Validator: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	// The SQL guard only looks at status; the handler checks tasks. Simulate the
+	// status changing to active after a run started.
+	if _, ok, err := st.Claim("T1", "r1", "fake"); err != nil || !ok {
+		t.Fatalf("claim = %v %v", ok, err)
+	}
+	if _, err := st.SettleRun(store.Settlement{RunID: "r1", RunStatus: domain.RunSucceeded, Accepted: true, Result: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MoveObjective("obj-1", goal.StatusActive); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AmendObjective("obj-1", "t", "changed after run", "", "", ""); err == nil {
+		t.Fatal("objective was amended during execution")
+	}
+}
