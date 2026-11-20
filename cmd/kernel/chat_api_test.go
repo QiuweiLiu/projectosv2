@@ -189,3 +189,78 @@ func TestStartHandoffRefusesRunningConversation(t *testing.T) {
 		t.Fatalf("control phrase was stored during a running turn: %+v", msgs)
 	}
 }
+
+func TestDetachObjectiveEndpointClearsLink(t *testing.T) {
+	root := t.TempDir()
+	cstore, err := conversation.Open(filepath.Join(root, "conversations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cstore.Close()
+	mgr := chat.New(chat.Config{Bin: "/nonexistent-opencode", Root: root, DefaultModel: "provider/model"}, cstore)
+	defer mgr.Close()
+	mux, ctl, err := buildMux(newWorkspace(root), true, mgr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	c, err := mgr.CreateConversation("chat", "", "", "", "provider/model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cstore.SetObjective(c.ID, "obj-1"); err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/conversations/"+c.ID+"/detach-objective", nil)
+	req.Header.Set("X-Kernel-Token", ctl.token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("detach = %d", res.StatusCode)
+	}
+	got, _, _ := cstore.Get(c.ID)
+	if got.ObjectiveID != "" {
+		t.Fatalf("objective link = %q", got.ObjectiveID)
+	}
+}
+
+func TestAutoApproveEndpointPersistsSetting(t *testing.T) {
+	root := t.TempDir()
+	cstore, err := conversation.Open(filepath.Join(root, "conversations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cstore.Close()
+	mgr := chat.New(chat.Config{Bin: "/nonexistent-opencode", Root: root, DefaultModel: "provider/model"}, cstore)
+	defer mgr.Close()
+	mux, ctl, err := buildMux(newWorkspace(root), true, mgr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	c, err := mgr.CreateConversation("chat", "", "", "", "provider/model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/conversations/"+c.ID+"/auto-approve",
+		strings.NewReader(`{"enabled":true}`))
+	req.Header.Set("X-Kernel-Token", ctl.token)
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("auto-approve = %d", res.StatusCode)
+	}
+	got, _, _ := cstore.Get(c.ID)
+	if !got.AutoApprove {
+		t.Fatal("auto approve not persisted")
+	}
+}

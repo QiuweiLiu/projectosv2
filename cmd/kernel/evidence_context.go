@@ -37,17 +37,23 @@ func (w *workspace) BuildEvidenceIndex(id string) (evidence.Index, error) {
 			continue
 		}
 		trust := evidence.TrustInProgress
+		cancelled := p.Obj.Status == goal.StatusCancelled
 		switch p.Obj.Status {
 		case goal.StatusCompleted:
 			trust = evidence.TrustObjectiveAccepted
 		case goal.StatusFailed, goal.StatusCancelled:
 			trust = evidence.TrustUnverified
 		}
-		idx.Entries = append(idx.Entries, evidence.Entry{
-			ProjectID: id, ObjectiveID: p.Obj.ID, Kind: evidence.KindObjective,
-			Trust: trust, Title: clipText(p.Obj.Goal, 300), Status: string(p.Obj.Status),
-			ObjectiveStatus: string(p.Obj.Status), UpdatedAt: p.Obj.UpdatedAt,
-		})
+		// A cancelled goal is history, not current project context. Its accepted
+		// artifacts are still real work and remain below; its failure lines are
+		// not presented as live blockers.
+		if !cancelled {
+			idx.Entries = append(idx.Entries, evidence.Entry{
+				ProjectID: id, ObjectiveID: p.Obj.ID, Kind: evidence.KindObjective,
+				Trust: trust, Title: clipText(p.Obj.Goal, 300), Status: string(p.Obj.Status),
+				ObjectiveStatus: string(p.Obj.Status), UpdatedAt: p.Obj.UpdatedAt,
+			})
+		}
 		published := map[string]ArtifactEntry{}
 		if manifest, merr := readManifestForObjective(p.Dir); merr == nil {
 			for _, entry := range manifest.Entries {
@@ -63,6 +69,9 @@ func (w *workspace) BuildEvidenceIndex(id string) (evidence.Index, error) {
 		tasks, _ := st.List()
 		for _, task := range tasks {
 			if task.ObjectiveID != p.Obj.ID {
+				continue
+			}
+			if cancelled && (task.Status == domain.TaskBlocked || task.Status == domain.TaskRejected) {
 				continue
 			}
 			if task.Status == domain.TaskBlocked || task.Status == domain.TaskRejected {

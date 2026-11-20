@@ -156,3 +156,66 @@ func TestEvidenceTrustLevelsTrackPublicationState(t *testing.T) {
 		t.Fatalf("active objective task trust = %s", got)
 	}
 }
+
+func TestEvidenceContextSkipsCancelledGoalButKeepsAcceptedWork(t *testing.T) {
+	root := t.TempDir()
+	ws := newWorkspace(root)
+	p, err := ws.CreateProject("P")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "projects", "obj-cancelled")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeProjectMeta(dir, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(dir, "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := st.CreateObjective(goal.Objective{ID: "obj-cancelled", ProjectPath: dir,
+		Goal: "CANCELLED GOAL TEXT", Status: goal.StatusActive, PlanVersion: 1,
+		CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateTask(domain.Task{ID: "T1", Validator: "ok", ObjectiveID: "obj-cancelled",
+		PlanVersion: 1, ArtifactPath: "keep.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := st.Claim("T1", "r1", "fake"); err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	if _, err := st.SettleRun(store.Settlement{RunID: "r1", RunStatus: domain.RunSucceeded,
+		Accepted: true, Result: "cancelled accepted work"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateTask(domain.Task{ID: "T2", Validator: "ok", ObjectiveID: "obj-cancelled",
+		PlanVersion: 1, ArtifactPath: "blocked.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := st.Claim("T2", "r2", "fake"); err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	if _, err := st.SettleRun(store.Settlement{RunID: "r2", RunStatus: domain.RunSucceeded,
+		Note: "review: blocking finding (P0/P1)"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MoveObjective("obj-cancelled", goal.StatusCancelled); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	ctx := ws.ProjectContextFor(p.ID, "cancelled")
+	if strings.Contains(ctx, "CANCELLED GOAL TEXT") {
+		t.Fatalf("cancelled goal leaked into context:\n%s", ctx)
+	}
+	if strings.Contains(ctx, "blocking finding") {
+		t.Fatalf("cancelled goal failure leaked into context:\n%s", ctx)
+	}
+	if !strings.Contains(ctx, "cancelled accepted work") {
+		t.Fatalf("accepted artifact from a cancelled goal missing:\n%s", ctx)
+	}
+}

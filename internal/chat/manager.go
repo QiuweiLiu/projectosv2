@@ -567,6 +567,31 @@ func (m *Manager) handle(ev opencodeserver.Event) {
 	case "session.tool.failed":
 		_, _ = m.persist(convID, "tool_result", map[string]any{"id": base.ID, "status": "failed", "message": base.Text})
 	case "permission.asked":
+		// Read-only access is part of normal chat; do not make the operator
+		// approve every file read. Writes, commands and questions still ask.
+		if autoApproveReadOnly(base.Action) {
+			if srv := m.currentServer(); srv != nil && base.SessionID != "" {
+				ctx, cancel := context.WithTimeout(m.ctx, 10*time.Second)
+				err := srv.ReplyPermission(ctx, base.SessionID, base.ID, "once", "")
+				cancel()
+				if err == nil {
+					_, _ = m.persist(convID, "permission_auto", map[string]any{
+						"requestId": base.ID, "action": base.Action, "resources": base.Resources,
+						"source": "readonly",
+					})
+					return
+				}
+			}
+		}
+		if !strings.EqualFold(strings.TrimSpace(base.Action), "question") {
+			if c, ok, _ := m.store.Get(convID); ok && c.AutoApprove {
+				_, _ = m.persist(convID, "permission_judging", map[string]any{
+					"requestId": base.ID, "action": base.Action, "resources": base.Resources,
+				})
+				go m.autoJudgePermission(convID, base.SessionID, base.ID, base.Action, base.Resources, base.Message)
+				return
+			}
+		}
 		_, _ = m.persist(convID, "permission", map[string]any{
 			"requestId": base.ID, "action": base.Action, "resources": base.Resources, "message": base.Message,
 		})
@@ -583,6 +608,15 @@ func (m *Manager) handle(ev opencodeserver.Event) {
 		m.setIdle(convID, conversation.StatusError, base.Text)
 	case "session.idle":
 		m.setIdle(convID, conversation.StatusIdle, "")
+	}
+}
+
+func autoApproveReadOnly(action string) bool {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "read", "list", "glob", "grep", "webfetch":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -801,6 +835,31 @@ func (m *Manager) GetDraft(id string) (conversation.GoalDraft, bool, error) {
 
 func (m *Manager) UpdateDraft(d conversation.GoalDraft) error {
 	return m.store.UpdateGoalDraft(d)
+}
+
+// DetachObjective clears the conversation's link to a managed objective. The
+// Kernel record (tasks, evidence, delivery) is untouched; only the chat stops
+// monitoring it. Used after a cancelled/failed goal or an explicit user action.
+func (m *Manager) DetachObjective(conversationID string) error {
+	c, ok, err := m.store.Get(conversationID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("unknown conversation")
+	}
+	if c.ObjectiveID == "" {
+		return nil
+	}
+	if err := m.store.SetObjective(conversationID, ""); err != nil {
+		return err
+	}
+	_, _ = m.persist(conversationID, "objective_detached", map[string]string{"objectiveId": c.ObjectiveID})
+	return nil
+}
+
+func (m *Manager) SetAutoApprove(conversationID string, on bool) error {
+	return m.store.SetAutoApprove(conversationID, on)
 }
 
 func (m *Manager) ConfirmDraft(draftID, objectiveID string) error {

@@ -331,3 +331,29 @@ func itoa(v int) string {
 	}
 	return string(buf[i:])
 }
+
+func TestAutoApproveSettingRoundTrips(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "conversations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	c, err := st.Create("auto", "", "", "/tmp/chat", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.AutoApprove {
+		t.Fatal("auto approve defaulted to true")
+	}
+	if err := st.SetAutoApprove(c.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := st.Get(c.ID)
+	if err != nil || !ok || !got.AutoApprove {
+		t.Fatalf("conversation = %+v %v %v", got, ok, err)
+	}
+	list, err := st.List(10)
+	if err != nil || len(list) != 1 || !list[0].AutoApprove {
+		t.Fatalf("list = %+v %v", list, err)
+	}
+}

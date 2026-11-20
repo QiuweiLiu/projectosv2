@@ -36,6 +36,7 @@ type Conversation struct {
 	Model          string    `json:"model,omitempty"`
 	Status         Status    `json:"status"`
 	ContextSent    bool      `json:"contextSent"`
+	AutoApprove    bool      `json:"autoApprove"`
 	ContextVersion string    `json:"contextVersion,omitempty"`
 	LastError      string    `json:"lastError,omitempty"`
 	CreatedAt      time.Time `json:"createdAt"`
@@ -184,7 +185,7 @@ func migrateConversations(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	haveSent, haveVersion := false, false
+	haveSent, haveVersion, haveAuto := false, false, false
 	for rows.Next() {
 		var cid int
 		var name, ctype string
@@ -199,6 +200,8 @@ func migrateConversations(db *sql.DB) error {
 			haveSent = true
 		case "context_version":
 			haveVersion = true
+		case "auto_approve":
+			haveAuto = true
 		}
 	}
 	rows.Close()
@@ -212,6 +215,11 @@ func migrateConversations(db *sql.DB) error {
 	}
 	if !haveVersion {
 		if _, err := db.Exec(`ALTER TABLE conversations ADD COLUMN context_version TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	if !haveAuto {
+		if _, err := db.Exec(`ALTER TABLE conversations ADD COLUMN auto_approve INTEGER NOT NULL DEFAULT 0`); err != nil {
 			return err
 		}
 	}
@@ -321,12 +329,13 @@ func (s *Store) Get(id string) (Conversation, bool, error) {
 func (s *Store) getLocked(id string) (Conversation, error) {
 	var c Conversation
 	var created, updated string
-	var contextSent int
-	err := s.db.QueryRow(`SELECT id,title,project_id,objective_id,dir,session_id,model,status,context_sent,context_version,last_error,created_at,updated_at
+	var contextSent, autoApprove int
+	err := s.db.QueryRow(`SELECT id,title,project_id,objective_id,dir,session_id,model,status,context_sent,auto_approve,context_version,last_error,created_at,updated_at
 		FROM conversations WHERE id=?`, id).Scan(
 		&c.ID, &c.Title, &c.ProjectID, &c.ObjectiveID, &c.Dir, &c.SessionID, &c.Model,
-		&c.Status, &contextSent, &c.ContextVersion, &c.LastError, &created, &updated)
+		&c.Status, &contextSent, &autoApprove, &c.ContextVersion, &c.LastError, &created, &updated)
 	c.ContextSent = contextSent == 1
+	c.AutoApprove = autoApprove == 1
 	if err != nil {
 		return Conversation{}, err
 	}
@@ -347,7 +356,7 @@ func (s *Store) List(limit int) ([]Summary, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rows, err := s.db.Query(`SELECT c.id,c.title,c.project_id,c.objective_id,c.dir,c.session_id,c.model,
-		c.status,c.context_sent,c.context_version,c.last_error,c.created_at,c.updated_at,
+		c.status,c.context_sent,c.auto_approve,c.context_version,c.last_error,c.created_at,c.updated_at,
 		COALESCE((SELECT m.text FROM messages m WHERE m.conversation_id=c.id ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1),'')
 		FROM conversations c ORDER BY c.updated_at DESC LIMIT ?`, limit)
 	if err != nil {
@@ -358,13 +367,14 @@ func (s *Store) List(limit int) ([]Summary, error) {
 	for rows.Next() {
 		var c Summary
 		var created, updated string
-		var contextSent int
+		var contextSent, autoApprove int
 		if err := rows.Scan(&c.ID, &c.Title, &c.ProjectID, &c.ObjectiveID, &c.Dir, &c.SessionID, &c.Model,
-			&c.Status, &contextSent, &c.ContextVersion, &c.LastError, &created, &updated, &c.LastMessage); err != nil {
+			&c.Status, &contextSent, &autoApprove, &c.ContextVersion, &c.LastError, &created, &updated, &c.LastMessage); err != nil {
 			return nil, err
 		}
 		c.CreatedAt, c.UpdatedAt = parseTime(created), parseTime(updated)
 		c.ContextSent = contextSent == 1
+		c.AutoApprove = autoApprove == 1
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -375,6 +385,17 @@ func (s *Store) MarkContextSent(id, version string) error {
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(`UPDATE conversations SET context_sent=1, context_version=?, updated_at=? WHERE id=?`,
 		version, now(), id)
+	return err
+}
+
+func (s *Store) SetAutoApprove(id string, on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value := 0
+	if on {
+		value = 1
+	}
+	_, err := s.db.Exec(`UPDATE conversations SET auto_approve=?, updated_at=? WHERE id=?`, value, now(), id)
 	return err
 }
 

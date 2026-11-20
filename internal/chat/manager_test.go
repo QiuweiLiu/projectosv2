@@ -348,3 +348,43 @@ func TestMatchServerUserMessageHandlesContextPrefixAndWrongID(t *testing.T) {
 		t.Fatalf("unknown matched %q", got)
 	}
 }
+
+func TestDetachObjectiveClearsConversationLink(t *testing.T) {
+	m, st, c := testManager(t)
+	if err := st.SetObjective(c.ID, "obj-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.DetachObjective(c.ID); err != nil {
+		t.Fatalf("detach: %v", err)
+	}
+	got, ok, err := st.Get(c.ID)
+	if err != nil || !ok || got.ObjectiveID != "" {
+		t.Fatalf("conversation = %+v %v %v", got, ok, err)
+	}
+	events, err := st.EventsAfter(c.ID, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, ev := range events {
+		if ev.Kind == "objective_detached" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing objective_detached event: %+v", events)
+	}
+}
+
+func TestAutoApproveReadOnlyActions(t *testing.T) {
+	for _, action := range []string{"read", "list", "grep", "glob", "webfetch", "READ"} {
+		if !autoApproveReadOnly(action) {
+			t.Fatalf("%q should be auto-approved", action)
+		}
+	}
+	for _, action := range []string{"edit", "bash", "shell", "question", ""} {
+		if autoApproveReadOnly(action) {
+			t.Fatalf("%q must still ask", action)
+		}
+	}
+}

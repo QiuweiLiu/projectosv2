@@ -12,6 +12,7 @@ import (
 
 	"projectos/kernel/internal/chat"
 	"projectos/kernel/internal/conversation"
+	"projectos/kernel/internal/goal"
 	"projectos/kernel/internal/modelcfg"
 	"projectos/kernel/internal/opencodeserver"
 )
@@ -90,6 +91,12 @@ func registerChatRoutes(mux *http.ServeMux, ctl *controlServer, mgr *chat.Manage
 			chatGet(w, r, mgr, id)
 		case r.Method == http.MethodPost && action == "messages":
 			chatSend(w, r, mgr, id)
+		case r.Method == http.MethodPost && action == "detach-objective":
+			if err := mgr.DetachObjective(id); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			_ = writeJSON(w, map[string]string{"status": "detached"})
 		case r.Method == http.MethodPost && action == "rewind":
 			var req struct {
 				MessageID string `json:"messageId"`
@@ -112,7 +119,19 @@ func registerChatRoutes(mux *http.ServeMux, ctl *controlServer, mgr *chat.Manage
 				http.Error(w, err.Error(), code)
 				return
 			}
-			_ = writeJSON(w, res)
+			detached := false
+			if c, _, gerr := mgr.Get(r.Context(), id, 1, ""); gerr == nil && c.ObjectiveID != "" {
+				if p, ok, ferr := ws.find(c.ObjectiveID); ferr == nil && ok &&
+					(p.Obj.Status == goal.StatusCancelled || p.Obj.Status == goal.StatusFailed) {
+					if derr := mgr.DetachObjective(id); derr == nil {
+						detached = true
+					}
+				}
+			}
+			_ = writeJSON(w, map[string]any{
+				"restoredText": res.RestoredText, "removed": res.Removed,
+				"session": res.Session, "remoteForked": res.RemoteForked, "detached": detached,
+			})
 		case r.Method == http.MethodPost && action == "stop":
 			if err := mgr.Stop(r.Context(), id); err != nil {
 				http.Error(w, err.Error(), http.StatusConflict)
@@ -147,6 +166,19 @@ func registerChatRoutes(mux *http.ServeMux, ctl *controlServer, mgr *chat.Manage
 			_ = writeJSON(w, map[string]string{"status": "ok"})
 		case strings.HasPrefix(action, "handoff"):
 			chatHandoff(w, r, ctl, mgr, id, action, ws)
+		case r.Method == http.MethodPost && action == "auto-approve":
+			var req struct {
+				Enabled bool `json:"enabled"`
+			}
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+				http.Error(w, "bad json", http.StatusBadRequest)
+				return
+			}
+			if err := mgr.SetAutoApprove(id, req.Enabled); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			_ = writeJSON(w, map[string]any{"enabled": req.Enabled})
 		case r.Method == http.MethodPost && strings.HasPrefix(action, "permissions/"):
 			chatPermission(w, r, mgr, id, strings.TrimPrefix(action, "permissions/"))
 		default:
@@ -481,17 +513,28 @@ func chatConfirmHandoff(w http.ResponseWriter, r *http.Request, ctl *controlServ
 		http.Error(w, "objective created but not found", http.StatusInternalServerError)
 		return
 	}
+	// Planning can take a minute or two. Create the objective and return now;
+	// the flow card polls the objective and the job status, so the chat is never
+	// stuck on a disabled "creating..." button.
+	if !ctl.claim(objectiveID) {
+		_ = writeJSON(w, map[string]any{"objective": objectiveID, "status": "draft",
+			"planPending": false, "planError": "another action is already running", "budget": d.Budget})
+		return
+	}
 	args := []string{"goal", "plan", "--dir", p.Dir, "--planner", "model"}
 	if contextText := ws.ProjectContextFor(p.ProjectID, d.Goal); contextText != "" {
 		args = append(args, "--context", contextText)
 	}
-	planErr := ""
-	if _, err := ctl.runGoal(p.Dir, args...); err != nil {
-		planErr = err.Error()
-	}
-	ctl.set(objectiveID, map[bool]string{true: "plan failed", false: "planned"}[planErr != ""])
+	ctl.set(objectiveID, "planning")
+	go func() {
+		defer ctl.release(objectiveID)
+		if _, err := ctl.runGoal(p.Dir, args...); err != nil {
+			ctl.set(objectiveID, "plan failed: "+err.Error())
+			return
+		}
+		ctl.set(objectiveID, "planned")
+	}()
 	_ = writeJSON(w, map[string]any{
-		"objective": objectiveID, "status": "draft", "planGenerated": planErr == "",
-		"planError": planErr, "budget": d.Budget,
+		"objective": objectiveID, "status": "draft", "planPending": true, "budget": d.Budget,
 	})
 }

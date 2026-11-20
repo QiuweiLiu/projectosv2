@@ -150,7 +150,7 @@ details[open] summary::before{content:"▾ "}
 .approval-task{border-top:1px solid #f0efec;padding:.5rem 0;font-size:.82rem}
 .approval-task:first-child{border-top:0}
 .approval-task code{font-family:ui-monospace,Menlo,monospace;font-size:.75rem;color:#8a5a00;word-break:break-all}
-.approval-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;margin:.8rem 0}
+.approval-grid{display:grid;grid-template-columns:minmax(0,220px);gap:.6rem;margin:.8rem 0}
 .approval-grid label{font-size:.75rem;color:var(--muted);display:flex;flex-direction:column;gap:.25rem}
 .approval-grid input{border:1px solid var(--line);border-radius:7px;padding:.35rem .45rem;font:inherit}
 .approval-check{display:flex;gap:.45rem;align-items:flex-start;font-size:.82rem;line-height:1.5;margin:.5rem 0 .9rem}
@@ -436,9 +436,7 @@ button:focus-visible{outline:2px solid #8a4325;outline-offset:2px}
       <div id="approvalReasons"></div>
       <div id="approvalTasks"></div>
       <div class="approval-grid">
-        <label>最多运行次数<input id="maxRuns" type="number" min="1" value="8"></label>
-        <label>最多审查次数<input id="maxReviews" type="number" min="1" value="8"></label>
-        <label>token 预算<input id="maxTokens" type="number" min="1" value="600000"></label>
+        <label>token 上限<input id="maxTokens" type="number" min="1" value="600000"></label>
       </div>
       <label class="approval-check"><input id="approveCheck" type="checkbox"> <span id="approvalCheckLabel">我已核对上述任务与命令，允许现在开始执行。</span></label>
       <div class="modal-actions">

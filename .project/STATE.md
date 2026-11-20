@@ -38,16 +38,14 @@ Kernel 仍是 Task/Run/Evidence/Review 唯一权威；没有第二套 Scheduler 
   回归测试 `TestOpencodeBinHonoursEnvironment`；PATH 仍为 v1.18.15 时 planner 实测成功。
 - **多工作区标签**：每标签独立 serve 端口与 WKWebView，同时保活；关闭标签只停自身服务，
   退出停自己启动的服务；偏好持久化；`--check-multi` 与 `--dump-tabs` 已验证。
-- **显式重新规划**：`kernel goal replan` + `POST /api/objectives/{id}/replan` 保留已通过任务、
-  替换 blocked/pending 任务、升到 plan vN+1 并回到 active；真实目标已从 7 blocked 变为
-  4 pending（v2），7 个旧任务 superseded；命令级 fake 测试覆盖替换与无操作两条路径。
-- **聊天内托管**：建议卡片/短句“可以开始规划”→ `POST /handoff/start`（消息入对话、不产生
-  额外回合）→ 会话流内联草稿（目标/预算/约束/产物/验收）→ 创建目标+计划 → 底部“托管流程”
-  dock（步骤/任务/命令审批/开始/恢复/重新规划/取消）+ 侧栏同步骤与下一步；5s 轮询目标状态。
-  未执行目标可“调整目标”（amend + plan），已执行/卡住可带 instruction 重新规划。
-- **撤回降级**：消息无远端 ID/无 session 直接本地回退；fork 404 先按文本+时间找回服务端
-  真实 ID 重试；仍找不到才 409 `rewind_local_only`，二次确认后 `localOnly:true` 只删本地。
-  不再把本地 `msg_` 当远端 ID。
+- **显式重新规划**：`goal replan` + `POST /replan` 保留已通过、替换 blocked/pending，
+  升到 vN+1 并回到 active；真实 7 blocked → 4 pending（v2）；fake 测试覆盖替换/无操作。
+- **聊天内托管**：建议/短句 → `POST /handoff/start`（不产生额外回合）→ 内联草稿（目标/
+  预算/约束/产物/验收）→ 目标+计划 → 底部“托管流程”dock + 侧栏步骤；5s 轮询。未执行可
+  “调整目标”（amend+plan），已执行/卡住可带 instruction 重新规划。
+- **撤回/关联**：fork 404 先按文本+时间找回真实 ID，仍失败才 409 + localOnly 二次确认；
+  撤回不删 Kernel 目标，cancelled/failed/completed 可“从对话移除”（只清 objective_id），
+  撤回后已取消/失败目标自动断开；取消目标不进入聊天证据，已验收产物仍保留。
 - **审查预算修复**：同一产物版本重试不再重复调用 reviewer，直接复用已记录结论；审查落库
   失败仅在用量确实未知时才全局停止，已知用量的策略性拒绝只阻塞当前任务。新增
   `TestIdenticalRetryReusesRecordedReviewAndDoesNotPoisonOthers`。
@@ -55,13 +53,10 @@ Kernel 仍是 Task/Run/Evidence/Review 唯一权威；没有第二套 Scheduler 
   `goal models --refresh` 遵循 `OPENCODE_BIN`，空结果不写缓存；实测 159 项。
 - **思考强度**：`variants` 写入 models.json；reviewer/acceptance 跟随 worker 的回退规则；
   聊天新会话生效；OpenCode server 已验证接受 variant。
-- **聊天界面**：用户消息右对齐；等待/工具间隙“正在思考”动画；思考过程折叠块；
-  1440 截图与 SSE 注入验证。
-- **托管建议**：每轮后由聊天模型判断，命中写 `handoff_suggestion`（0.95 实测），
-  刷新可回放；确认面板改为目标+流程+摘要卡片，Goal 使用用户语言。
-- **撤回消息**：fork 模型会话到目标消息前，删除其后消息/事件并恢复输入；文件与 Task 不回滚。
-  实测 API 删除 2 条、Session 更换、UI 输入恢复。
-- **中断收尾**：interrupted/error 清理失效审批、提示无最终回答，提供重新编辑/继续。
+- **聊天界面**：用户消息右对齐、思考折叠块、Markdown/柔和动效；中断清理审批并提供重新编辑/继续。
+- **聊天审批/预算**：只读自动 once；输入区“帮我审批”开关（低风险模型自动允许，高风险
+  弹卡并附原因；失败按高风险）；审批 dock 可堆叠；托管确认异步、计划可重试；预算只填 token；
+  每个对话最多一条托管建议（≥2 用户回合、无提问、confidence≥0.75）。
 - **对话控制**：思考过程默认展开、输入区可切换并持久化；生成中输入区/思考行可停止；
   question 工具通过 OpenCode form 渲染并提交答案，解决等待问题时的卡住。
 - **桌面对话框**：WKWebView 接入 `WKUIDelegate`；confirm/alert/prompt 不再静默失败。

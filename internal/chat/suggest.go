@@ -27,6 +27,15 @@ func (m *Manager) SuggestObjective(ctx context.Context, conversationID, assistan
 	if err != nil || !ok || c.ObjectiveID != "" {
 		return
 	}
+	// One proposal per conversation is enough. Dismissing it does not disable
+	// the explicit "转为托管目标" button, so repeated prompts are pure noise.
+	if events, eerr := m.store.EventsAfter(conversationID, 0, 500); eerr == nil {
+		for _, ev := range events {
+			if ev.Kind == "handoff_suggestion" {
+				return
+			}
+		}
+	}
 	if assistantMessageID != "" {
 		if prev, seen := m.suggested.Load(conversationID); seen && prev == assistantMessageID {
 			return
@@ -35,15 +44,30 @@ func (m *Manager) SuggestObjective(ctx context.Context, conversationID, assistan
 	}
 
 	msgs, err := m.store.Messages(conversationID, 8, "")
-	if err != nil || len(msgs) == 0 {
+	if err != nil || len(msgs) < 3 {
+		return
+	}
+	userTurns := 0
+	for _, msg := range msgs {
+		if msg.Role == "user" {
+			userTurns++
+		}
+	}
+	if userTurns < 2 {
+		return
+	}
+	// Do not propose while the assistant is still gathering requirements.
+	last := msgs[len(msgs)-1]
+	if last.Role == "assistant" &&
+		(strings.Contains(last.Text, "？") || strings.HasSuffix(strings.TrimSpace(last.Text), "?")) {
 		return
 	}
 	var b strings.Builder
 	b.WriteString(`You route a chat workspace conversation. Decide whether it should become a managed Objective handled by ProjectOS.
 Return JSON only, no prose: {"objective":true|false,"confidence":0.0,"goal":"...","reason":"..."}
 
-objective=true for multi-step work with concrete deliverables: writing code or files, research with outputs, repeated operations, or an explicitly stated project/goal. Scope confirmation or planning for such work still counts, even if the latest turn only asks to confirm requirements.
-objective=false for greetings, explanations, single facts, short advice, meta questions, or anything already answered in one turn.
+objective=true only when the conversation already contains a concrete goal AND at least one concrete deliverable, constraint, or acceptance condition, and the user has asked to plan or proceed. Multi-step code/file work, research with outputs, and repeated operations qualify.
+objective=false for greetings, explanations, single facts, short advice, meta questions, anything already answered in one turn, and any conversation where key requirements are still missing or the assistant is asking a clarifying question.
 goal: one concise sentence in the user's language; empty when objective=false.
 reason: at most 20 words, in the user's language.
 Do not infer requirements the user did not state.
@@ -134,7 +158,7 @@ Conversation (most recent last):
 	parsed.Reason = strings.TrimSpace(parsed.Reason)
 	m.suggestLog("conv=%s objective=%v confidence=%.2f goal=%q reason=%q", conversationID,
 		parsed.Objective, parsed.Confidence, clipText(parsed.Goal, 120), clipText(parsed.Reason, 120))
-	if !parsed.Objective || parsed.Confidence < 0.55 || parsed.Goal == "" {
+	if !parsed.Objective || parsed.Confidence < 0.75 || parsed.Goal == "" {
 		return
 	}
 	_, _ = m.persist(conversationID, "handoff_suggestion", map[string]any{
