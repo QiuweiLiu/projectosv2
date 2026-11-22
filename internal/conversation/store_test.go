@@ -378,3 +378,66 @@ func TestHasEventFindsOneShotSuggestions(t *testing.T) {
 		t.Fatalf("event not found = %v %v", seen, err)
 	}
 }
+
+func TestGoalDraftClaimIsExclusive(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "conversations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	c, err := st.Create("handoff", "proj-1", "", "/tmp/chat", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := st.CreateGoalDraft(GoalDraft{ConversationID: c.ID, ProjectID: "proj-1", Goal: "build"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := st.ClaimGoalDraft(d.ID, "obj-1")
+	if err != nil || !ok {
+		t.Fatalf("first claim = %v %v", ok, err)
+	}
+	if got, ok, err := st.GetGoalDraft(d.ID); err != nil || !ok || got.ObjectiveID != "obj-1" {
+		t.Fatalf("claimed draft = %+v %v %v", got, ok, err)
+	}
+	if ok, err := st.ClaimGoalDraft(d.ID, "obj-2"); err != nil || ok {
+		t.Fatalf("second claim = %v %v", ok, err)
+	}
+	if err := st.UpdateGoalDraft(d); err == nil {
+		t.Fatal("claimed draft remained editable")
+	}
+	if err := st.ReleaseGoalDraft(d.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok, err := st.GetGoalDraft(d.ID); err != nil || !ok || got.ObjectiveID != "" {
+		t.Fatalf("released draft = %+v %v %v", got, ok, err)
+	}
+	if ok, err := st.ClaimGoalDraft(d.ID, "obj-3"); err != nil || !ok {
+		t.Fatalf("claim after release = %v %v", ok, err)
+	}
+	if err := st.ConfirmGoalDraft(d.ID, "obj-3"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLastEventSeqTracksAppendedEvents(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "conversations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	c, err := st.Create("events", "", "", "/tmp/chat", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seq, err := st.LastEventSeq(c.ID); err != nil || seq != 0 {
+		t.Fatalf("empty seq = %d %v", seq, err)
+	}
+	ev, err := st.AppendEvent(c.ID, "test", map[string]string{"k": "v"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seq, err := st.LastEventSeq(c.ID); err != nil || seq != ev.Seq {
+		t.Fatalf("last seq = %d %v, want %d", seq, err, ev.Seq)
+	}
+}

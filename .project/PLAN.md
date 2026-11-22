@@ -1,10 +1,10 @@
 # Plan
 
 ## Now
-F-01..F-07 收口完成并通过 `-race`/vet/desktop check 与独立复核，已提交；随后恢复 P6 可靠性加固。
+UI/UX 极简重构与复核修复已提交；随后恢复 P6 可靠性加固。
 
 ## Steps
-1. 提交 F 收口并重启桌面应用，确认真实导航/审批路径。
+1. 已提交 UI/UX 重构；真机确认 900/1440 布局与远程鉴权。
 2. 跑 Task B（数据分析）与 Task C（多阶段研究）真实对照，记录 hidden test、wall/tokens。
 3. 按样本评估 Planner/Reviewer/Acceptance 成本；只做证据支持的默认策略调整。
 4. 补磁盘满、只读挂载、WAL、OpenCode Server 退出重连故障注入。

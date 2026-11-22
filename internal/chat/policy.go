@@ -375,6 +375,11 @@ func (m *Manager) argvDecision(root string, fields []string) (riskDecision, stri
 	if len(fields) == 0 {
 		return riskAskModel, ""
 	}
+	// Callers may pass either the configured root or an already-resolved one;
+	// canonicalize so resolvePath's EvalSymlinks result compares correctly.
+	if real, err := filepath.EvalSymlinks(root); err == nil {
+		root = real
+	}
 	name := strings.ToLower(fields[0])
 	if strings.EqualFold(name, "sudo") {
 		return riskPrompt, "sudo 需要人工确认"
@@ -880,22 +885,21 @@ func allowedCommand(fields []string) bool {
 // The hard blacklist is evaluated before these rules, so they cannot approve
 // a destructive command.
 
-type approvalRule struct {
+// ApprovalRule is one remembered "always allow" command prefix.
+type ApprovalRule struct {
 	Action string   `json:"action"`
 	Prefix []string `json:"prefix"`
 }
 
 type approvalRulesFile struct {
-	Allow []approvalRule `json:"allow"`
+	Allow []ApprovalRule `json:"allow"`
 }
 
 func (m *Manager) approvalRulesPath() string {
 	return filepath.Join(m.cfg.Root, "approval-rules.json")
 }
 
-func (m *Manager) approvalRules() approvalRulesFile {
-	m.rulesMu.Lock()
-	defer m.rulesMu.Unlock()
+func (m *Manager) readApprovalRulesLocked() approvalRulesFile {
 	raw, err := os.ReadFile(m.approvalRulesPath())
 	if err != nil {
 		return approvalRulesFile{}
@@ -903,6 +907,58 @@ func (m *Manager) approvalRules() approvalRulesFile {
 	var out approvalRulesFile
 	_ = json.Unmarshal(raw, &out)
 	return out
+}
+
+func (m *Manager) approvalRules() approvalRulesFile {
+	m.rulesMu.Lock()
+	defer m.rulesMu.Unlock()
+	return m.readApprovalRulesLocked()
+}
+
+// ApprovalRules returns a copy for the settings UI.
+func (m *Manager) ApprovalRules() []ApprovalRule {
+	m.rulesMu.Lock()
+	defer m.rulesMu.Unlock()
+	rules := m.readApprovalRulesLocked()
+	out := make([]ApprovalRule, 0, len(rules.Allow))
+	for _, rule := range rules.Allow {
+		out = append(out, ApprovalRule{Action: rule.Action, Prefix: append([]string(nil), rule.Prefix...)})
+	}
+	return out
+}
+
+// DeleteApprovalRule removes the rule at index. It reports whether the index
+// existed; the file is rewritten atomically.
+func (m *Manager) DeleteApprovalRule(index int) (bool, error) {
+	m.rulesMu.Lock()
+	defer m.rulesMu.Unlock()
+	rules := m.readApprovalRulesLocked()
+	if index < 0 || index >= len(rules.Allow) {
+		return false, nil
+	}
+	rules.Allow = append(rules.Allow[:index], rules.Allow[index+1:]...)
+	return true, m.writeApprovalRulesLocked(rules)
+}
+
+func (m *Manager) writeApprovalRulesLocked(rules approvalRulesFile) error {
+	raw, err := json.MarshalIndent(rules, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(m.approvalRulesPath()), ".approval-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(append(raw, '\n')); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, m.approvalRulesPath())
 }
 
 func ruleMatches(rules approvalRulesFile, action string, fields []string) bool {
@@ -1004,30 +1060,12 @@ func (m *Manager) recordApprovalRule(action string, resources []string) {
 	}
 	m.rulesMu.Lock()
 	defer m.rulesMu.Unlock()
-	var rules approvalRulesFile
-	if raw, err := os.ReadFile(m.approvalRulesPath()); err == nil {
-		_ = json.Unmarshal(raw, &rules)
-	}
+	rules := m.readApprovalRulesLocked()
 	for _, rule := range rules.Allow {
 		if strings.EqualFold(rule.Action, action) && strings.Join(rule.Prefix, "\x00") == strings.Join(prefix, "\x00") {
 			return
 		}
 	}
-	rules.Allow = append(rules.Allow, approvalRule{Action: strings.ToLower(action), Prefix: prefix})
-	raw, err := json.MarshalIndent(rules, "", "  ")
-	if err != nil {
-		return
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(m.approvalRulesPath()), ".approval-*.tmp")
-	if err != nil {
-		return
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if _, err := tmp.Write(append(raw, '\n')); err != nil {
-		tmp.Close()
-		return
-	}
-	_ = tmp.Close()
-	_ = os.Rename(tmpPath, m.approvalRulesPath())
+	rules.Allow = append(rules.Allow, ApprovalRule{Action: strings.ToLower(action), Prefix: prefix})
+	_ = m.writeApprovalRulesLocked(rules)
 }

@@ -27,12 +27,13 @@ import (
 // in-process write is recovery approval, which takes the same state-dir lock as
 // a scheduler and uses Store transitions; there is still one write authority.
 type controlServer struct {
-	binary string
-	ws     *workspace
-	token  string
-	mu     sync.Mutex
-	jobs   map[string]string // objective id -> last known status
-	busy   map[string]bool   // objective id -> a plan/run is already in flight
+	binary   string
+	ws       *workspace
+	token    string
+	mu       sync.Mutex
+	modelsMu sync.Mutex        // serializes read-modify-write of models.json
+	jobs     map[string]string // objective id -> last known status
+	busy     map[string]bool   // objective id -> a plan/run is already in flight
 }
 
 func newControl(binary string, ws *workspace) *controlServer {
@@ -123,7 +124,15 @@ func (c *controlServer) createGoal(w http.ResponseWriter, r *http.Request) {
 
 // createObjective is shared by the HTTP create endpoint and the chat handoff
 // confirmation. It never confirms a plan or starts a run.
+func newObjectiveID() string { return "obj-" + newInstance() }
+
 func (c *controlServer) createObjective(req goalRequest) (string, error) {
+	return c.createObjectiveWithID(req, "")
+}
+
+// createObjectiveWithID lets a handoff confirmation choose the id before the
+// draft is claimed, so a crash can be retried without creating a duplicate.
+func (c *controlServer) createObjectiveWithID(req goalRequest, objectiveID string) (string, error) {
 	if strings.TrimSpace(req.Goal) == "" {
 		return "", fmt.Errorf("goal is required")
 	}
@@ -134,6 +143,13 @@ func (c *controlServer) createObjective(req goalRequest) (string, error) {
 	if _, ok, err := c.ws.FindProject(projectID); err != nil || !ok {
 		return "", fmt.Errorf("unknown project")
 	}
+	if objectiveID != "" {
+		if _, found, err := c.ws.find(objectiveID); err != nil {
+			return "", err
+		} else if found {
+			return "", fmt.Errorf("objective %s already exists", objectiveID)
+		}
+	}
 	dir, err := c.ws.newProjectDir()
 	if err != nil {
 		return "", err
@@ -142,6 +158,12 @@ func (c *controlServer) createObjective(req goalRequest) (string, error) {
 		return "", err
 	}
 	args := []string{"goal", "create", "--dir", dir, "--goal", req.Goal}
+	if objectiveID != "" {
+		if !validObjectiveID(objectiveID) {
+			return "", fmt.Errorf("invalid objective id")
+		}
+		args = append(args, "--id", objectiveID)
+	}
 	if req.Title != "" {
 		args = append(args, "--title", req.Title)
 	}
@@ -160,6 +182,9 @@ func (c *controlServer) createObjective(req goalRequest) (string, error) {
 	id, err := objectiveInDir(dir)
 	if err != nil {
 		return "", err
+	}
+	if objectiveID != "" && id != objectiveID {
+		return "", fmt.Errorf("created objective %s, want %s", id, objectiveID)
 	}
 	dir = c.ws.adopt(dir, id)
 	c.set(id, "draft")
@@ -629,7 +654,7 @@ func (c *controlServer) updateModels(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Role    string  `json:"role"`
-		Model   string  `json:"model"`
+		Model   *string `json:"model"`
 		Variant *string `json:"variant"`
 		Refresh bool    `json:"refresh"`
 	}
@@ -638,20 +663,30 @@ func (c *controlServer) updateModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	role := strings.TrimSpace(req.Role)
-	if role == "" && !req.Refresh && req.Variant == nil {
+	if role == "" && !req.Refresh && req.Variant == nil && req.Model == nil {
 		http.Error(w, "role or refresh is required", http.StatusBadRequest)
+		return
+	}
+	if req.Model != nil && role == "" {
+		http.Error(w, "role is required for a model", http.StatusBadRequest)
 		return
 	}
 	if req.Variant != nil && role == "" {
 		http.Error(w, "role is required for a variant", http.StatusBadRequest)
 		return
 	}
+	if role != "" && !req.Refresh && req.Model == nil && req.Variant == nil {
+		http.Error(w, "model or variant is required", http.StatusBadRequest)
+		return
+	}
+	c.modelsMu.Lock()
+	defer c.modelsMu.Unlock()
 	args := []string{"goal", "models", "--dir", c.ws.root}
 	if req.Refresh {
 		args = append(args, "--refresh")
 	}
-	if role != "" {
-		args = append(args, "--set", role+"="+req.Model)
+	if req.Model != nil {
+		args = append(args, "--set", role+"="+*req.Model)
 	}
 	if req.Variant != nil {
 		args = append(args, "--variant", role+"="+*req.Variant)

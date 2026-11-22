@@ -1,5 +1,5 @@
 # Handoff
-Status: F 收口完成，已提交
+Status: UI/UX 极简重构，已提交
 
 ## Goal
 在 Go Kernel 上提供长期、多目标、可恢复的 AI 科研/工程工作台；Kernel 是 Task/Run/
@@ -17,6 +17,15 @@ Evidence/Review 唯一权威，模型只提案，人在关键处确认。
 - 安全复核：真实路径 symlink/`..`、`--`、测试运行器裸操作数、敏感名/`secrets.*`、
   根递归搜索与 `git show/diff/log` 内容门禁、旧 always 规则、chat variant、delivery
   回滚、rewind 重复消息歧义、evidence 微预算。
+- 极简工作台：chat/ui 收拢为单一 CSS，分段导航、52px 顶栏、发送/停止合一、设置浮层、
+  检查器折叠与角标、审批规则管理、驾驶舱多 Tab/动作菜单；远程 Blob/SSE 鉴权。
+- 复核修复：聊天草稿/预算改走正确 handoff 接口；驾驶舱异步读取与 SSE 绑定 objective；
+  聊天移动端侧栏抽屉；聊天 variant 运行时重读 `models.json`；handoff 确认先原子 claim；
+  模型设置子进程串行化。
+- 复核二轮：model 更新用指针区分清空/未提供；handoff 持久化 objective ID、`goal create --id`
+  支持崩溃后续建与幂等返回；聊天选择增加 generation，预算绑定 conversation，切换丢弃旧响应。
+- 最终复核 SUBMIT；SSE/表单/审批/自动审批均绑定会话。
+- 审批历史：从 `lastEventSeq` 后订阅，只渲染 pending；已答问题卡移除。
 
 ## Verified
 - `go test -race -count=1 ./...`、`go vet ./...` 全绿；`desktop/build.sh` 与
@@ -26,6 +35,11 @@ Evidence/Review 唯一权威，模型只提案，人在关键处确认。
   并发 Assemble、微预算 evidence summary；复核补 symlink/`..`、测试运行器裸操作数、
   `secrets.*`、`git diff/show/log` 内容门禁与旧规则。
 - 既有场景：真实目标规划/执行/验收/交付、审批弹窗、diff、多标签、撤回、故障注入仍通过。
+- 浏览器 mock 数据 1440/900/700：无横向滚动、控制台无错误；聊天设置/放行规则/移动端
+  抽屉、驾驶舱概览/任务/交付/设置/更多菜单均截图检查。
+- 新增 `TestLiveChatVariantReadsRuntimeSettings`、`TestGoalDraftClaimIsExclusive`、
+  `TestUpdateModelsVariantDoesNotClearModel`、`TestGoalCreateUsesExplicitID`；全量
+  `-race`/vet/node/desktop check 再通过。
 
 ## Open
 - ctx 取消/进程回收、UTF-8 截断统一、P2 清理未做。
@@ -34,12 +48,12 @@ Evidence/Review 唯一权威，模型只提案，人在关键处确认。
 
 ## Active
 - 工作副本 `~/dev/projectosv2`，HEAD 见 `git log`（本轮已 push）。
-- 本轮提交：`desktop/main.m`、`docs/chat.md`、
-  `internal/chat/{policy,approve,rewind,manager_test,approve_test}.go`、
-  `internal/delivery/{report,assemble_test}.go`、`internal/evidence/*`、控制面。
+- 本轮提交：`cmd/kernel/{chat,ui}.html`、`chat_api.go`、`status.go`、`serve.go`、
+  `control.go`、`internal/chat/{policy,manager,handoff,approve}.go`、
+  `internal/conversation/store.go`、`internal/modelcfg/modelcfg.go`、`docs/*`、控制面。
 - `.project/DECISIONS.md` 已改为索引，正文在 `decisions/2026-11.md`。
 
 ## Next
-1. 用户确认后提交并推送 F 收口。
-2. 启动/重启桌面应用以使用新的导航限制。
+1. 本轮已提交；重启桌面应用或刷新标签确认布局。
+2. 重启桌面应用，真机确认 900/1440 布局与控制台。
 3. 继续 ctx 取消/进程回收与剩余故障注入。

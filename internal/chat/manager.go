@@ -27,6 +27,16 @@ var (
 	ErrNoServer = errors.New("chat runtime is unavailable")
 )
 
+// liveChatVariant re-reads models.json so a settings change applies to the next
+// session without restarting the server. If no settings file exists, the
+// startup config remains the default.
+func (m *Manager) liveChatVariant() string {
+	if _, err := os.Stat(modelcfg.Path(m.cfg.Root)); err == nil {
+		return modelcfg.Load(m.cfg.Root).VariantFor("chat")
+	}
+	return m.cfg.Variant
+}
+
 type Config struct {
 	Bin            string
 	Root           string // workspace root
@@ -226,7 +236,7 @@ func (m *Manager) ensureSession(ctx context.Context, srv *opencodeserver.Server,
 	if strings.TrimSpace(model) == "" {
 		model = m.cfg.DefaultModel
 	}
-	sess, err := srv.CreateSession(ctx, title, modelcfg.WithVariant(model, m.cfg.Variant), dir)
+	sess, err := srv.CreateSession(ctx, title, modelcfg.WithVariant(model, m.liveChatVariant()), dir)
 	if err != nil {
 		return "", err
 	}
@@ -922,8 +932,46 @@ func (m *Manager) DetachObjective(conversationID string) error {
 	return nil
 }
 
+// LastEventSeq exposes the newest conversation event cursor.
+func (m *Manager) LastEventSeq(conversationID string) (int64, error) {
+	return m.store.LastEventSeq(conversationID)
+}
+
+// PendingPermissions returns the OpenCode permission requests that still block
+// this conversation. It is used when opening a conversation so only live
+// pending approvals are rendered, never replayed history.
+func (m *Manager) PendingPermissions(ctx context.Context, conversationID string) ([]opencodeserver.PermissionRequest, error) {
+	c, ok, err := m.store.Get(conversationID)
+	if err != nil || !ok || c.SessionID == "" {
+		return nil, err
+	}
+	srv := m.currentServer()
+	if srv == nil || !srv.Alive() {
+		return nil, nil
+	}
+	requests, err := srv.PendingPermissions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]opencodeserver.PermissionRequest, 0, len(requests))
+	for _, req := range requests {
+		if req.SessionID == c.SessionID {
+			out = append(out, req)
+		}
+	}
+	return out, nil
+}
+
 func (m *Manager) SetAutoApprove(conversationID string, on bool) error {
 	return m.store.SetAutoApprove(conversationID, on)
+}
+
+func (m *Manager) ClaimDraft(draftID, objectiveID string) (bool, error) {
+	return m.store.ClaimGoalDraft(draftID, objectiveID)
+}
+
+func (m *Manager) ReleaseDraft(draftID string) error {
+	return m.store.ReleaseGoalDraft(draftID)
 }
 
 func (m *Manager) ConfirmDraft(draftID, objectiveID string) error {

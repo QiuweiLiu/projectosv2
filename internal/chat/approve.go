@@ -68,7 +68,7 @@ Request:
 		return "", "", err
 	}
 	settings := modelcfg.Load(m.cfg.Root)
-	model := approvalModel(settings, c.Model, m.cfg.DefaultModel, m.cfg.Variant)
+	model := approvalModel(settings, c.Model, m.cfg.DefaultModel, m.liveChatVariant())
 	sess, err := srv.CreateSessionWithPolicy(ctx, "Permission risk", model, dir,
 		[]map[string]string{{"action": "*", "resource": "*", "effect": "deny"}})
 	if err != nil {

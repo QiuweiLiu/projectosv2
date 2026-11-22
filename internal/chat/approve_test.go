@@ -29,3 +29,24 @@ func TestApprovalModelVariantIsolation(t *testing.T) {
 		t.Fatalf("default fallback = %q", got)
 	}
 }
+
+func TestLiveChatVariantReadsRuntimeSettings(t *testing.T) {
+	root := t.TempDir()
+	m := &Manager{cfg: Config{Root: root, Variant: "low"}}
+	if got := m.liveChatVariant(); got != "low" {
+		t.Fatalf("startup fallback = %q", got)
+	}
+	if err := modelcfg.Save(root, modelcfg.Settings{Chat: "provider/model",
+		Variants: map[string]string{"chat": "high"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.liveChatVariant(); got != "high" {
+		t.Fatalf("runtime variant = %q", got)
+	}
+	if err := modelcfg.Save(root, modelcfg.Settings{Chat: "provider/model"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.liveChatVariant(); got != "" {
+		t.Fatalf("cleared runtime variant = %q", got)
+	}
+}

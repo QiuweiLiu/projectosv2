@@ -28,7 +28,7 @@ kernel serve --dir D --stop                 # 停掉 HTTP 服务
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/status` | 兼容旧看板的状态摘要 |
+| GET | `/api/status` | 兼容旧看板的状态摘要；聊天页用 `remote` / `workspaceWarning` 判断远程鉴权与工作区提醒 |
 | GET | `/api/tasks/{id}?objective=…` | 单个任务的 evidence / review / 错误；若已有中文解释则带 `explanation` |
 | GET | `/api/events?objective=…&after=N&limit=K` | 事件页，返回 `{events, next}`；用 `next` 续传，不重复 |
 | GET | `/api/objectives` | 聚合 Workspace 内全部目标 + 任务计数 |
@@ -55,7 +55,7 @@ kernel serve --dir D --stop                 # 停掉 HTTP 服务
 | POST | `/api/objectives/{id}/cancel` | `{reason}`，协作式取消 |
 | POST | `/api/objectives/{id}/pause` | 请求调度器暂停启动新任务；当前 Run 会继续完成 |
 | POST | `/api/objectives/{id}/unpause` | 移除暂停标记，调度器继续 |
-| POST | `/api/models` | `{role,model}` 保存一个角色；`{role,variant}` 设置思考强度；`{refresh:true}` 刷新模型列表（需 token） |
+| POST | `/api/models` | `{role,model}` 保存一个角色（`model:""` 明确清空）；`{role,variant}` 只设置思考强度、不清空模型；`{refresh:true}` 刷新模型列表（需 token） |
 | POST | `/api/objectives/{id}/report` | 让模型重写汇报（写入 `report.md`） |
 | POST | `/api/objectives/{id}/continue` | `{goal}`：在已完成/失败的目标上追加任务，生成新计划版本 |
 | POST | `/api/tasks/{id}/explain?objective=…` | 让汇报人把该任务的审查意见翻成中文（按 findings 哈希缓存） |
@@ -66,6 +66,16 @@ kernel serve --dir D --stop                 # 停掉 HTTP 服务
 
 未带 token → 401；`--control` 未开启 → 403。`--allow-remote` 必须同时启用 `--control`，
 否则拒绝启动；远程模式下 `/api/*` 与 `/files/*` 都需要 token。
+
+聊天设置还提供：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/approval-rules` | 当前工作区 `approval-rules.json` 的 `{rules:[{action,prefix}]}`；需 control + token |
+| DELETE | `/api/approval-rules` | `{index}` 删除一条“始终允许”前缀；需 control + token |
+
+远程模式下页面用带 `X-Kernel-Token` 的 `fetch` 读取 `/files/*` 并转成 Blob URL；
+SSE 同样走请求头，不把 token 放进查询参数。
 
 ## 4. 多目标 Workspace
 
@@ -95,7 +105,7 @@ D/                           # Workspace 根
 |---|---|---|
 | GET | `/api/conversations` | 对话列表 + 最后一条消息 |
 | POST | `/api/conversations` | `{title,projectId,objectiveId,model}` 创建对话；可关联 Objective 以使用其目录 |
-| GET | `/api/conversations/{id}` | 对话 + 历史消息（分页上限 500） |
+| GET | `/api/conversations/{id}` | 对话 + 历史消息（分页上限 500）+ `lastEventSeq` + 当前 `permissions`；页面从游标之后订阅，避免重放历史审批 |
 | POST | `/api/conversations/{id}/messages` | `{text}` 发送；返回 202，回复通过 SSE 到达 |
 | POST | `/api/conversations/{id}/stop` | 中断当前 OpenCode 执行 |
 | POST | `/api/conversations/{id}/permissions/{requestId}` | `{decision: once|always|reject}` 批准工具调用 |

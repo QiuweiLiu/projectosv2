@@ -56,7 +56,7 @@ func (m *Manager) DraftGoal(ctx context.Context, conversationID string) (convers
 	if model == "" {
 		model = m.cfg.DefaultModel
 	}
-	model = modelcfg.WithVariant(model, m.cfg.Variant)
+	model = modelcfg.WithVariant(model, m.liveChatVariant())
 	sess, err := srv.CreateSessionWithPolicy(ctx, "Goal handoff draft", model, dir,
 		[]map[string]string{{"action": "*", "resource": "*", "effect": "deny"}})
 	if err != nil {

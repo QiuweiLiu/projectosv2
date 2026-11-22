@@ -73,7 +73,8 @@ type GoalDraft struct {
 	SourceMessageIDs []string     `json:"sourceMessageIds,omitempty"`
 	ContextVersion   string       `json:"contextVersion,omitempty"`
 	Budget           *DraftBudget `json:"budget,omitempty"`
-	Status           string       `json:"status"` // draft | confirmed
+	ObjectiveID      string       `json:"objectiveId,omitempty"`
+	Status           string       `json:"status"` // draft | confirming | confirmed
 	CreatedAt        time.Time    `json:"createdAt"`
 	UpdatedAt        time.Time    `json:"updatedAt"`
 }
@@ -135,6 +136,7 @@ CREATE TABLE IF NOT EXISTS goal_drafts (
 	source_message_ids TEXT NOT NULL DEFAULT '[]',
 	context_version    TEXT NOT NULL DEFAULT '',
 	budget             TEXT NOT NULL DEFAULT '{}',
+	objective_id       TEXT NOT NULL DEFAULT '',
 	status             TEXT NOT NULL DEFAULT 'draft',
 	created_at         TEXT NOT NULL,
 	updated_at         TEXT NOT NULL
@@ -262,6 +264,7 @@ func migrateGoalDrafts(db *sql.DB) error {
 		return err
 	}
 	haveBudget := false
+	haveObjective := false
 	for rows.Next() {
 		var cid int
 		var name, ctype string
@@ -274,6 +277,9 @@ func migrateGoalDrafts(db *sql.DB) error {
 		if name == "budget" {
 			haveBudget = true
 		}
+		if name == "objective_id" {
+			haveObjective = true
+		}
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -281,6 +287,11 @@ func migrateGoalDrafts(db *sql.DB) error {
 	}
 	if !haveBudget {
 		if _, err := db.Exec(`ALTER TABLE goal_drafts ADD COLUMN budget TEXT NOT NULL DEFAULT '{}'`); err != nil {
+			return err
+		}
+	}
+	if !haveObjective {
+		if _, err := db.Exec(`ALTER TABLE goal_drafts ADD COLUMN objective_id TEXT NOT NULL DEFAULT ''`); err != nil {
 			return err
 		}
 	}
@@ -786,6 +797,17 @@ func (s *Store) AppendEvent(conversationID, kind string, data any) (Event, error
 	return Event{Seq: seq, ConversationID: conversationID, Kind: kind, Data: raw, At: time.Now().UTC()}, nil
 }
 
+// LastEventSeq returns the newest event cursor for a conversation. A client can
+// start streaming after it to avoid replaying old approval/tool history.
+func (s *Store) LastEventSeq(conversationID string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var seq int64
+	err := s.db.QueryRow(`SELECT COALESCE(MAX(seq),0) FROM events WHERE conversation_id=?`,
+		conversationID).Scan(&seq)
+	return seq, err
+}
+
 func (s *Store) EventsAfter(conversationID string, after int64, limit int) ([]Event, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 200
@@ -862,10 +884,10 @@ func (s *Store) getDraftLocked(id string) (GoalDraft, bool, error) {
 	var d GoalDraft
 	var constraints, expected, acceptance, decisions, sources, budget, created, updated string
 	err := s.db.QueryRow(`SELECT id,conversation_id,project_id,goal,constraints,expected_outputs,
-		acceptance,decisions,source_message_ids,context_version,budget,status,created_at,updated_at
+		acceptance,decisions,source_message_ids,context_version,budget,objective_id,status,created_at,updated_at
 		FROM goal_drafts WHERE id=?`, id).Scan(
 		&d.ID, &d.ConversationID, &d.ProjectID, &d.Goal, &constraints, &expected, &acceptance,
-		&decisions, &sources, &d.ContextVersion, &budget, &d.Status, &created, &updated)
+		&decisions, &sources, &d.ContextVersion, &budget, &d.ObjectiveID, &d.Status, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return GoalDraft{}, false, nil
 	}
@@ -904,6 +926,30 @@ func (s *Store) UpdateGoalDraft(d GoalDraft) error {
 	return nil
 }
 
+// ClaimGoalDraft atomically moves a draft from editable to confirming. Only one
+// tab can win, so a double-click cannot create two Objectives.
+func (s *Store) ClaimGoalDraft(id, objectiveID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res, err := s.db.Exec(`UPDATE goal_drafts SET status='confirming', objective_id=?, updated_at=?
+		WHERE id=? AND status='draft'`, objectiveID, now(), id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+// ReleaseGoalDraft returns a claimed draft to editable state after Objective
+// creation failed before anything was linked.
+func (s *Store) ReleaseGoalDraft(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE goal_drafts SET status='draft', objective_id='', updated_at=?
+		WHERE id=? AND status='confirming'`, now(), id)
+	return err
+}
+
 func (s *Store) ConfirmGoalDraft(id, objectiveID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -912,8 +958,8 @@ func (s *Store) ConfirmGoalDraft(id, objectiveID string) error {
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE goal_drafts SET status='confirmed', updated_at=? WHERE id=? AND status='draft'`,
-		now(), id)
+	res, err := tx.Exec(`UPDATE goal_drafts SET status='confirmed', updated_at=?
+		WHERE id=? AND status IN ('draft','confirming')`, now(), id)
 	if err != nil {
 		return err
 	}

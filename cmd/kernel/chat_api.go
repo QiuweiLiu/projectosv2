@@ -18,6 +18,40 @@ import (
 )
 
 func registerChatRoutes(mux *http.ServeMux, ctl *controlServer, mgr *chat.Manager, ws *workspace) {
+	mux.HandleFunc("/api/approval-rules", func(w http.ResponseWriter, r *http.Request) {
+		if !ctl.authorised(r) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			rules := mgr.ApprovalRules()
+			if rules == nil {
+				rules = []chat.ApprovalRule{}
+			}
+			_ = writeJSON(w, map[string]any{"rules": rules})
+		case http.MethodDelete:
+			var req struct {
+				Index int `json:"index"`
+			}
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+				http.Error(w, "bad json", http.StatusBadRequest)
+				return
+			}
+			ok, err := mgr.DeleteApprovalRule(req.Index)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if !ok {
+				http.Error(w, "unknown rule", http.StatusNotFound)
+				return
+			}
+			_ = writeJSON(w, map[string]bool{"deleted": true})
+		default:
+			http.Error(w, "GET or DELETE only", http.StatusMethodNotAllowed)
+		}
+	})
 	mux.HandleFunc("/api/conversations", func(w http.ResponseWriter, r *http.Request) {
 		if !ctl.authorised(r) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -232,8 +266,14 @@ func chatGet(w http.ResponseWriter, r *http.Request, mgr *chat.Manager, id strin
 	if msgs == nil {
 		msgs = []conversation.Message{}
 	}
+	lastSeq, _ := mgr.LastEventSeq(id)
+	pending, _ := mgr.PendingPermissions(r.Context(), id)
+	if pending == nil {
+		pending = []opencodeserver.PermissionRequest{}
+	}
 	_ = writeJSON(w, map[string]any{
 		"conversation": c, "messages": msgs, "active": mgr.Active(id),
+		"lastEventSeq": lastSeq, "permissions": pending,
 	})
 }
 
@@ -487,10 +527,37 @@ func chatConfirmHandoff(w http.ResponseWriter, r *http.Request, ctl *controlServ
 		http.Error(w, "unknown draft", http.StatusNotFound)
 		return
 	}
-	if d.Status != "draft" {
-		http.Error(w, "draft is already confirmed", http.StatusConflict)
+	confirmKey := "handoff:" + draftID
+	if !ctl.claim(confirmKey) {
+		http.Error(w, "handoff confirmation is already in progress", http.StatusConflict)
 		return
 	}
+	defer ctl.release(confirmKey)
+
+	var objectiveID string
+	switch d.Status {
+	case "draft":
+		objectiveID = newObjectiveID()
+		claimed, err := mgr.ClaimDraft(draftID, objectiveID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !claimed {
+			http.Error(w, "draft is being confirmed", http.StatusConflict)
+			return
+		}
+	case "confirming", "confirmed":
+		objectiveID = d.ObjectiveID
+		if objectiveID == "" {
+			http.Error(w, "draft is being confirmed without a persisted objective id; inspect the workspace", http.StatusConflict)
+			return
+		}
+	default:
+		http.Error(w, "draft is not confirmable", http.StatusConflict)
+		return
+	}
+
 	constraints := append([]string(nil), d.Constraints...)
 	if len(d.Decisions) > 0 {
 		constraints = append(constraints, "Already decided: "+strings.Join(d.Decisions, "; "))
@@ -501,20 +568,55 @@ func chatConfirmHandoff(w http.ResponseWriter, r *http.Request, ctl *controlServ
 		Expected:    strings.Join(d.ExpectedOutputs, "; "),
 		Acceptance:  strings.Join(d.Acceptance, "; "),
 	}
-	objectiveID, err := ctl.createObjective(req)
+
+	p, found, err := ctl.ws.find(objectiveID)
 	if err != nil {
-		http.Error(w, "create objective: "+err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := mgr.ConfirmDraft(draftID, objectiveID); err != nil {
-		http.Error(w, "link draft: "+err.Error(), http.StatusInternalServerError)
-		return
+	if !found {
+		if d.Status == "confirmed" {
+			http.Error(w, "confirmed handoff points at a missing objective", http.StatusInternalServerError)
+			return
+		}
+		created, err := ctl.createObjectiveWithID(req, objectiveID)
+		if err != nil {
+			_, found, findErr := ctl.ws.find(objectiveID)
+			if findErr != nil {
+				http.Error(w, "create objective: "+err.Error()+" (cannot verify whether objective "+objectiveID+" exists; retry)", http.StatusInternalServerError)
+				return
+			}
+			if found {
+				http.Error(w, "create objective: "+err.Error()+" (objective "+objectiveID+" exists; retry to link it)", http.StatusInternalServerError)
+				return
+			}
+			_ = mgr.ReleaseDraft(draftID)
+			http.Error(w, "create objective: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		objectiveID = created
 	}
-	p, ok, err := ctl.ws.find(objectiveID)
-	if err != nil || !ok {
+	if d.Status != "confirmed" {
+		if err := mgr.ConfirmDraft(draftID, objectiveID); err != nil {
+			http.Error(w, "link draft: "+err.Error()+" (objective "+objectiveID+" created)", http.StatusInternalServerError)
+			return
+		}
+	}
+	p, found, err = ctl.ws.find(objectiveID)
+	if err != nil || !found {
 		http.Error(w, "objective created but not found", http.StatusInternalServerError)
 		return
 	}
+
+	// A retry after the plan already exists is idempotent: return the objective
+	// instead of creating a second one or planning it twice.
+	if p.Obj.Status != goal.StatusDraft || p.Obj.PlanVersion > 0 {
+		_ = writeJSON(w, map[string]any{
+			"objective": objectiveID, "status": string(p.Obj.Status), "planPending": false, "budget": d.Budget,
+		})
+		return
+	}
+
 	// Planning can take a minute or two. Create the objective and return now;
 	// the flow card polls the objective and the job status, so the chat is never
 	// stuck on a disabled "creating..." button.

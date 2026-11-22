@@ -2,7 +2,9 @@ package main
 
 import (
 	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"projectos/kernel/internal/store"
@@ -19,19 +21,21 @@ type taskRow struct {
 }
 
 type statusView struct {
-	ObjectiveName string    `json:"name"`
-	ObjectiveHash string    `json:"hash"`
-	Pack          string    `json:"pack"`
-	Quarantine    string    `json:"quarantine,omitempty"`
-	Control       bool      `json:"control"`
-	Instance      string    `json:"instance"`
-	PromptChars   int       `json:"promptChars"`
-	OutputChars   int       `json:"outputChars"`
-	PromptTokens  int       `json:"promptTokens"`
-	OutputTokens  int       `json:"outputTokens"`
-	Estimated     bool      `json:"usageEstimated"`
-	Tasks         []taskRow `json:"tasks"`
-	At            time.Time `json:"at"`
+	ObjectiveName    string    `json:"name"`
+	ObjectiveHash    string    `json:"hash"`
+	Pack             string    `json:"pack"`
+	Quarantine       string    `json:"quarantine,omitempty"`
+	Control          bool      `json:"control"`
+	Remote           bool      `json:"remote,omitempty"`
+	WorkspaceWarning string    `json:"workspaceWarning,omitempty"`
+	Instance         string    `json:"instance"`
+	PromptChars      int       `json:"promptChars"`
+	OutputChars      int       `json:"outputChars"`
+	PromptTokens     int       `json:"promptTokens"`
+	OutputTokens     int       `json:"outputTokens"`
+	Estimated        bool      `json:"usageEstimated"`
+	Tasks            []taskRow `json:"tasks"`
+	At               time.Time `json:"at"`
 }
 
 func collectStatus(st *store.Store) (statusView, error) {
@@ -93,15 +97,37 @@ func serveStatus(w http.ResponseWriter, st *store.Store) {
 	_ = writeJSON(w, view)
 }
 
+// workspaceWarning classifies overly broad or synchronized workspaces without
+// exposing the absolute path to a remote client.
+func workspaceWarning(root string) string {
+	clean := filepath.Clean(root)
+	if real, err := filepath.EvalSymlinks(clean); err == nil {
+		clean = real
+	}
+	if clean == string(filepath.Separator) {
+		return "root"
+	}
+	if home, err := os.UserHomeDir(); err == nil && filepath.Clean(home) == clean {
+		return "home"
+	}
+	if strings.Contains(strings.ToLower(filepath.ToSlash(clean)), "mobile documents") {
+		return "icloud"
+	}
+	return ""
+}
+
 // serveWorkspaceStatus keeps the legacy dashboard endpoint alive. The cockpit
 // only needs the control flag and instance id; the objective list and task
 // counts have their own scoped endpoints.
 func serveWorkspaceStatus(w http.ResponseWriter, ws *workspace) {
-	view := statusView{Control: controlOn, Instance: serveInstance, At: time.Now().UTC()}
+	view := statusView{Control: controlOn, Remote: serveRemote,
+		WorkspaceWarning: workspaceWarning(ws.root), Instance: serveInstance, At: time.Now().UTC()}
 	if st, err := store.OpenReadOnly(filepath.Join(ws.root, "kernel.db")); err == nil {
 		if root, err := collectStatus(st); err == nil {
 			view = root
 			view.Control = controlOn
+			view.Remote = serveRemote
+			view.WorkspaceWarning = workspaceWarning(ws.root)
 			view.Instance = serveInstance
 			view.At = time.Now().UTC()
 		}

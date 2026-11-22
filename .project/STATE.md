@@ -7,7 +7,7 @@ P6.3 完成 1 个真实 OpenCode/ProjectOS 对照样本，B/C 尚未运行。
 Kernel 仍是 Task/Run/Evidence/Review 唯一权威；没有第二套 Scheduler 或 Agent Loop。
 
 ## Verified
-- **298 项 Go 测试 + `-race` + `vet` 全绿**；桌面 `--check` 通过。
+- **全量 Go 测试 + `-race` + `vet` 全绿**；桌面 `--check` 通过。
 - **P6.0 Manifest**：seed 现在先取共享锁再读 Manifest，Manifest 与文件处于同一版本区间；
   发布 crash 后恢复 `.artifacts-old`、清理 staging；`TestSeedReadsManifestAndFilesUnderOneVersionLock`
   证明不会跨版本组合。
@@ -31,9 +31,9 @@ Kernel 仍是 Task/Run/Evidence/Review 唯一权威；没有第二套 Scheduler 
   ProjectOS 多出 Planner + 2 Workers + 5 review/acceptance calls；这是成本负结果，不是
   ProjectOS 优势证明。详见 `reports/p6-benchmark-2026-11-07.md`。
 - **P5 保留**：场景 A 自动恢复、B/C 真实 worker 读取共享产物、C 中断后人工恢复完成。
-- **蓝白工作台真机验收**：审批闭环、流式、Handoff 草稿/确认、Cockpit 计划与执行前门禁、
-  失败 Recovery、完成证据、断线重连、项目切换均通过；修 11 项前端缺陷（流式去重、
-  状态标签、Markdown、欢迎态、深链、证据 Tab、审批复位、IME 回车等）。截图见 HANDOFF。
+- **极简工作台**：聊天/驾驶舱统一低饱和设计、分段导航、52px 顶栏、发送/停止合一、
+  设置浮层与检查器折叠；审批规则可视化、远程 Blob/SSE 鉴权；复核补 handoff/异步/移动抽屉/
+  运行时 variant；900/1440/700 无横向滚动、控制台无错误。
 - **OPENCODE_BIN**：planner/worker/reviewer/acceptance 现与聊天共用该变量（`goal.go`），
   回归测试 `TestOpencodeBinHonoursEnvironment`；PATH 仍为 v1.18.15 时 planner 实测成功。
 - **多工作区标签**：每标签独立 serve 端口与 WKWebView，同时保活；关闭标签只停自身服务，
@@ -49,7 +49,7 @@ Kernel 仍是 Task/Run/Evidence/Review 唯一权威；没有第二套 Scheduler 
 - **审查预算修复**：同一产物版本重试不再重复调用 reviewer，直接复用已记录结论；审查落库
   失败仅在用量确实未知时才全局停止，已知用量的策略性拒绝只阻塞当前任务。新增
   `TestIdenticalRetryReusesRecordedReviewAndDoesNotPoisonOthers`。
-- **模型选择**：6 角色下拉与思考强度（`#variant` 写入 variants，reviewer/acceptance 跟随
+- **模型选择**：7 角色（含 approval）下拉与思考强度（`#variant` 写入 variants，reviewer/acceptance 跟随
   worker）；空缓存自动刷新；`goal models --refresh` 遵循 `OPENCODE_BIN`；实测 159 项。
 - **聊天界面**：用户消息右对齐、思考折叠块、Markdown/柔和动效；中断清理审批并提供重新编辑/继续。
 - **聊天审批/预算**：只读自动 once；输入区“帮我审批”开关（低风险模型自动允许，高风险

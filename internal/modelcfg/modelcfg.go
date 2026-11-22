@@ -52,6 +52,10 @@ func settingsPath(dir string) string {
 	return filepath.Join(dir, "models.json")
 }
 
+// Path returns the effective models.json path, including the environment
+// override used when serve passes policy down to goal subprocesses.
+func Path(dir string) string { return settingsPath(dir) }
+
 func cachePath(dir string) string {
 	if p := os.Getenv("KERNEL_MODELS_CACHE"); p != "" {
 		return p

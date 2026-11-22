@@ -80,6 +80,8 @@
 - `conversations.db`（含聊天内容）以 0600 创建；不是 Kernel 任务库。
 - 聊天使用独立的私有 `opencode serve`，Basic 密码只在 Kernel 内存中，不写入前端。
 - 聊天 API 全部要求 `X-Kernel-Token`；SSE 也用请求头，不把 token 放在 URL。
+- `--allow-remote` 下聊天页的 `/files/*` 预览/下载同样用带 token 的 `fetch` 转 Blob URL，
+  避免 `<img>`/`<a>` 直接请求 401；令牌缺失或失效时页面自动打开设置。
 - 聊天 Session 权限规则为 `*: ask`：工具调用先产生 `permission.asked`，用户批准后才执行。
 - 聊天默认工作目录是 `<workspace>/chats/<conversation>`；关联 Objective 时使用项目目录，
   因此写文件和命令仍然需要逐次批准。

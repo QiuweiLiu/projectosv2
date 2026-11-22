@@ -30,6 +30,10 @@ import (
 
 var controlOn bool
 
+// serveRemote mirrors --allow-remote so /api/status can tell the UI that file
+// previews and event streams must carry the token.
+var serveRemote bool
+
 // serveInstance identifies this process in /api/status. --stop refuses to signal
 // a PID whose answers do not carry the instance recorded in serve.json, which is
 // what makes PID reuse harmless.
@@ -400,6 +404,7 @@ func ensureStateDB(dir string) error {
 
 func serveForeground(dir, addr string, control, allowRemote bool) int {
 	serveInstance = os.Getenv("KERNEL_SERVE_INSTANCE")
+	serveRemote = allowRemote
 	// One server per state dir, independent of PID files: the lock dies with the
 	// process, so a stale serve.json cannot block a restart.
 	lock, lerr := store.AcquireLock(filepath.Join(dir, "serve.lock"))

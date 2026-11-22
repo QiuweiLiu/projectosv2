@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -262,5 +263,123 @@ func TestAutoApproveEndpointPersistsSetting(t *testing.T) {
 	got, _, _ := cstore.Get(c.ID)
 	if !got.AutoApprove {
 		t.Fatal("auto approve not persisted")
+	}
+}
+
+func TestApprovalRulesAPIListsAndDeletes(t *testing.T) {
+	root := t.TempDir()
+	cstore, err := conversation.Open(filepath.Join(root, "conversations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cstore.Close()
+	mgr := chat.New(chat.Config{Bin: "/nonexistent-opencode", Root: root, DefaultModel: "provider/model"}, cstore)
+	defer mgr.Close()
+	if err := os.WriteFile(filepath.Join(root, "approval-rules.json"),
+		[]byte(`{"allow":[{"action":"bash","prefix":["make","test"]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mux, ctl, err := buildMux(newWorkspace(root), true, mgr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	res, err := http.Get(ts.URL + "/api/approval-rules")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthorized list = %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/approval-rules", nil)
+	req.Header.Set("X-Kernel-Token", ctl.token)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed struct {
+		Rules []chat.ApprovalRule `json:"rules"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if len(listed.Rules) != 1 || strings.Join(listed.Rules[0].Prefix, " ") != "make test" {
+		t.Fatalf("rules = %+v", listed.Rules)
+	}
+
+	req, _ = http.NewRequest(http.MethodDelete, ts.URL+"/api/approval-rules",
+		strings.NewReader(`{"index":0}`))
+	req.Header.Set("X-Kernel-Token", ctl.token)
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("delete = %d", res.StatusCode)
+	}
+	res.Body.Close()
+	if len(mgr.ApprovalRules()) != 0 {
+		t.Fatal("rule was not deleted")
+	}
+
+	req, _ = http.NewRequest(http.MethodDelete, ts.URL+"/api/approval-rules",
+		strings.NewReader(`{"index":9}`))
+	req.Header.Set("X-Kernel-Token", ctl.token)
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("out-of-range delete = %d", res.StatusCode)
+	}
+	res.Body.Close()
+}
+
+func TestChatGetIncludesEventCursorAndPendingPermissions(t *testing.T) {
+	root := t.TempDir()
+	cstore, err := conversation.Open(filepath.Join(root, "conversations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cstore.Close()
+	mgr := chat.New(chat.Config{Bin: "/nonexistent-opencode", Root: root, DefaultModel: "provider/model"}, cstore)
+	defer mgr.Close()
+	mux, ctl, err := buildMux(newWorkspace(root), true, mgr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	c, err := mgr.CreateConversation("chat", "", "", "", "provider/model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, err := cstore.AppendEvent(c.ID, "permission", map[string]string{"requestId": "p1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/conversations/"+c.ID, nil)
+	req.Header.Set("X-Kernel-Token", ctl.token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var body struct {
+		LastEventSeq int64 `json:"lastEventSeq"`
+		Permissions  []any `json:"permissions"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.LastEventSeq != ev.Seq || body.Permissions == nil {
+		t.Fatalf("body = %+v (event %d)", body, ev.Seq)
 	}
 }

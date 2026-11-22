@@ -44,6 +44,8 @@ open desktop/build/ProjectOS.app
 - 工作区在 iCloud 且文件未下载时，会先请求 iCloud 下载，并在标签内显示
   “正在下载 iCloud 文件…”；下载完成后自动启动服务。失败时显示原因，并提供
   “重试”和“在 Finder 中显示”。下载超过 15 分钟按失败处理。
+- 工作区位于 iCloud 同步目录、用户主目录或 `/` 时，页面顶部显示一条细提示，
+  建议改选具体项目目录；数据来自 `/api/status.workspaceWarning`。
 
 `PROJECTOS_DIR` 仍然拥有最高优先级：设置后只打开该目录一个标签，且不写入偏好，
 添加/关闭标签被禁用，适合自动化与 `--check`。

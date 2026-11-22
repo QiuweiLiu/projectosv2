@@ -641,6 +641,27 @@ func TestApprovalRulesRefuseDangerousPrefixes(t *testing.T) {
 	}
 }
 
+func TestApprovalRulesListAndDelete(t *testing.T) {
+	m := &Manager{cfg: Config{Root: t.TempDir()}}
+	m.recordApprovalRule("bash", []string{"make test"})
+	m.recordApprovalRule("bash", []string{"npm run build"})
+	rules := m.ApprovalRules()
+	if len(rules) != 2 || strings.Join(rules[0].Prefix, " ") != "make test" {
+		t.Fatalf("rules = %+v", rules)
+	}
+	ok, err := m.DeleteApprovalRule(0)
+	if err != nil || !ok {
+		t.Fatalf("delete = %v %v", ok, err)
+	}
+	rules = m.ApprovalRules()
+	if len(rules) != 1 || strings.Join(rules[0].Prefix, " ") != "npm run build" {
+		t.Fatalf("after delete = %+v", rules)
+	}
+	if ok, err := m.DeleteApprovalRule(9); err != nil || ok {
+		t.Fatalf("out-of-range delete = %v %v", ok, err)
+	}
+}
+
 func TestResolvePathFailsClosedAfterDepthLimit(t *testing.T) {
 	root := t.TempDir()
 	deep := filepath.Join(root, strings.Repeat("missing/", maxSymlinkDepth+2), "x.txt")
@@ -796,7 +817,7 @@ func TestShellPolicyResolvesSymlinkBeforeParentAndAfterDoubleDash(t *testing.T) 
 func TestLegacyRulesCannotBypassUnsafePrefixes(t *testing.T) {
 	root := t.TempDir()
 	m := &Manager{cfg: Config{Root: root}}
-	rules := approvalRulesFile{Allow: []approvalRule{
+	rules := approvalRulesFile{Allow: []ApprovalRule{
 		{Action: "bash", Prefix: []string{"nohup"}},
 		{Action: "bash", Prefix: []string{"python3", "-c"}},
 		{Action: "bash", Prefix: []string{"git", "checkout"}},

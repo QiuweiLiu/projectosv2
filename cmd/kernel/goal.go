@@ -206,6 +206,7 @@ func goalCreate(args []string) int {
 	constraints := fs.String("constraints", "", "constraints")
 	expected := fs.String("expected", "", "expected outcome")
 	acceptance := fs.String("acceptance", "", "objective-level acceptance")
+	idFlag := fs.String("id", "", "optional objective id (handoff retries)")
 	if err := fs.Parse(args); err != nil {
 		return exitError
 	}
@@ -226,7 +227,14 @@ func goalCreate(args []string) int {
 		fmt.Fprintf(os.Stderr, "state dir already has objective %s; use a new --dir\n", existing.ID)
 		return exitError
 	}
-	id := fmt.Sprintf("obj-%d", time.Now().UnixNano())
+	id := strings.TrimSpace(*idFlag)
+	if id == "" {
+		id = fmt.Sprintf("obj-%d", time.Now().UnixNano())
+	}
+	if !validObjectiveID(id) {
+		fmt.Fprintln(os.Stderr, "invalid objective id")
+		return exitError
+	}
 	t := *title
 	if t == "" {
 		t = firstLine(*text, 48)
