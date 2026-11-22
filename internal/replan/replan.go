@@ -193,7 +193,8 @@ func canonicalValidators(in []verify.Spec) []string {
 
 // Apply records the replacement plan, supersedes tasks it drops, then activates
 // the new version. It returns how many tasks were retired.
-func Apply(st *store.Store, objectiveID string, version int, old, new goal.Plan, hash string) (int, error) {
+func Apply(st *store.Store, objectiveID string, version int, old, new goal.Plan, hash string,
+	usage store.PlanUsage) (int, error) {
 	tasks, err := st.List()
 	if err != nil {
 		return 0, err
@@ -225,5 +226,5 @@ func Apply(st *store.Store, objectiveID string, version int, old, new goal.Plan,
 		}
 	}
 	return st.ApplyReplan(objectiveID, version, new, hash, superseded,
-		"superseded by plan v"+fmt.Sprint(version))
+		"superseded by plan v"+fmt.Sprint(version), usage)
 }

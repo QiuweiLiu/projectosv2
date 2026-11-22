@@ -127,6 +127,17 @@ func Assemble(st *store.Store, dir string) (int, error) {
 	if info, err := os.Lstat(root); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		return 0, fmt.Errorf("%s is a symlink; refusing to assemble through it", root)
 	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return 0, err
+	}
+	// Build the new delivery tree beside out/ and swap it in only when every
+	// artifact has been read and written. A half-written out/ must never be
+	// visible to /files, the report or VerifyAssembled.
+	tmp, err := os.MkdirTemp(dir, ".out.tmp-")
+	if err != nil {
+		return 0, err
+	}
+	defer os.RemoveAll(tmp)
 	count := 0
 	for _, t := range tasks {
 		if t.Status != domain.TaskAccepted || t.ArtifactPath == "" {
@@ -140,17 +151,15 @@ func Assemble(st *store.Store, dir string) (int, error) {
 		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") {
 			return count, fmt.Errorf("task %s artifact escapes the tree: %q", t.ID, t.ArtifactPath)
 		}
-		target := filepath.Join(root, clean)
-		// Check every existing component before creating directories: MkdirAll
-		// through a symlinked parent would create directories outside out/.
-		if err := noSymlinkPath(root, clean); err != nil {
+		target := filepath.Join(tmp, clean)
+		// The temp tree is fresh; noSymlinkPath also guards against a symlink
+		// planted between MkdirTemp and this write.
+		if err := noSymlinkPath(tmp, clean); err != nil {
 			return count, err
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return count, err
 		}
-		// The final path may itself be a symlink; O_NOFOLLOW makes the write
-		// fail instead of overwriting the link target outside out/.
 		file, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o644)
 		if err != nil {
 			return count, fmt.Errorf("refusing to write %s: %w", clean, err)
@@ -164,7 +173,33 @@ func Assemble(st *store.Store, dir string) (int, error) {
 		}
 		count++
 	}
+	if err := swapOut(dir, tmp, root); err != nil {
+		return count, err
+	}
 	return count, nil
+}
+
+// swapOut replaces dir/out with tmp. The rename sequence is atomic per step;
+// the brief window where out/ does not exist is preferable to serving a mixed
+// old/new tree.
+func swapOut(dir, tmp, root string) error {
+	backup := ""
+	if _, err := os.Lstat(root); err == nil {
+		backup = filepath.Join(dir, fmt.Sprintf(".out.old-%d", time.Now().UnixNano()))
+		if err := os.Rename(root, backup); err != nil {
+			return fmt.Errorf("stage old delivery: %w", err)
+		}
+	}
+	if err := os.Rename(tmp, root); err != nil {
+		if backup != "" {
+			_ = os.Rename(backup, root)
+		}
+		return fmt.Errorf("publish delivery: %w", err)
+	}
+	if backup != "" {
+		_ = os.RemoveAll(backup)
+	}
+	return nil
 }
 
 // VerifyAssembled runs every accepted task's command validators against a copy

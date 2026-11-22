@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"projectos/kernel/internal/modelcfg"
 	"projectos/kernel/internal/opencodeserver"
 )
 
@@ -62,10 +63,15 @@ Request:
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", "", err
 	}
-	model := strings.TrimSpace(strings.Split(c.Model, "#")[0])
+	settings := modelcfg.Load(m.cfg.Root)
+	model := strings.TrimSpace(settings.Approval)
+	if model == "" {
+		model = strings.TrimSpace(strings.Split(c.Model, "#")[0])
+	}
 	if model == "" {
 		model = m.cfg.DefaultModel
 	}
+	model = modelcfg.WithVariant(model, settings.VariantFor("approval"))
 	sess, err := srv.CreateSessionWithPolicy(ctx, "Permission risk", model, dir,
 		[]map[string]string{{"action": "*", "resource": "*", "effect": "deny"}})
 	if err != nil {

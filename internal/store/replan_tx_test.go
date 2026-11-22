@@ -33,7 +33,7 @@ func TestApplyReplanIsAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := st.ApplyReplan("obj-1", 2, spec, "dup", []domain.TaskID{"T1"}, "superseded"); err == nil {
+	if _, err := st.ApplyReplan("obj-1", 2, spec, "dup", []domain.TaskID{"T1"}, "superseded", store.PlanUsage{}); err == nil {
 		t.Fatal("duplicate plan version was accepted")
 	}
 	task, ok, err := st.Get("T1")
@@ -81,7 +81,7 @@ func TestTasksForPlanIncludesCarriedAcceptedTasks(t *testing.T) {
 		{ID: "T1", Goal: "seed", Artifacts: []string{"a.txt"}, Risk: "low"},
 		{ID: "T2", Goal: "extra", Artifacts: []string{"b.txt"}, Risk: "low", Deps: []string{"T1"}},
 	}}
-	if _, err := st.ApplyReplan("obj-1", 2, v2, "h2", nil, "v2"); err != nil {
+	if _, err := st.ApplyReplan("obj-1", 2, v2, "h2", nil, "v2", store.PlanUsage{}); err != nil {
 		t.Fatal(err)
 	}
 	tasks, err := st.TasksForPlan("obj-1", 2)
@@ -126,5 +126,31 @@ func TestAmendObjectiveOnlyBeforeExecution(t *testing.T) {
 	}
 	if err := st.AmendObjective("obj-1", "t", "changed after run", "", "", ""); err == nil {
 		t.Fatal("objective was amended during execution")
+	}
+}
+
+func TestApplyReplanRecordsPlanUsage(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := time.Now().UTC()
+	if err := st.CreateObjective(goal.Objective{ID: "obj-1", Goal: "g", Status: goal.StatusActive,
+		PlanVersion: 1, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	spec := goal.Plan{Tasks: []goal.PlanTask{{ID: "T2", Goal: "fix", Artifacts: []string{"b.txt"}, Risk: "low"}}}
+	if _, err := st.ApplyReplan("obj-1", 2, spec, "h2", nil, "v2", store.PlanUsage{
+		PromptChars: 40, OutputChars: 20, PromptTokens: 10, OutputTokens: 5, UsageEstimated: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := st.Metrics()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.PlannerPromptTokens != 10 || m.PlannerOutputTokens != 5 {
+		t.Fatalf("planner tokens = %d/%d", m.PlannerPromptTokens, m.PlannerOutputTokens)
 	}
 }

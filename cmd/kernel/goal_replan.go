@@ -139,9 +139,10 @@ func goalReplan(args []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	var newPlan goal.Plan
+	var replanUsage store.PlanUsage
 	replanErr := error(nil)
 	for attempt := 0; attempt < 2; attempt++ {
-		candidate, _, gerr := planner.Generate(ctx, p, planner.Request{
+		candidate, planResult, gerr := planner.Generate(ctx, p, planner.Request{
 			Goal: obj.Goal, Constraints: obj.Constraints, Expected: obj.ExpectedOutcome,
 			Feedback: feedback, MaxTasks: limit, Context: *projectContext,
 		}, 2)
@@ -171,6 +172,11 @@ func goalReplan(args []string) int {
 			continue
 		}
 		newPlan = candidate
+		replanUsage = store.PlanUsage{
+			PromptChars: planResult.PromptChars, OutputChars: planResult.OutputChars,
+			PromptTokens: planResult.PromptTokens, OutputTokens: planResult.OutputTokens,
+			UsageEstimated: planResult.UsageEstimated,
+		}
 		replanErr = nil
 		break
 	}
@@ -185,7 +191,7 @@ func goalReplan(args []string) int {
 		return exitError
 	}
 	version := obj.PlanVersion + 1
-	retired, err := replan.Apply(st, obj.ID, version, record.Spec, newPlan, hash)
+	retired, err := replan.Apply(st, obj.ID, version, record.Spec, newPlan, hash, replanUsage)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "replan apply:", err)
 		return exitError

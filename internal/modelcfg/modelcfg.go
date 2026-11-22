@@ -17,7 +17,7 @@ import (
 )
 
 // Roles are the model-backed parts of the system.
-var Roles = []string{"planner", "worker", "reviewer", "acceptance", "reporter", "chat"}
+var Roles = []string{"planner", "worker", "reviewer", "acceptance", "reporter", "chat", "approval"}
 
 type Settings struct {
 	Planner    string `json:"planner,omitempty"`
@@ -26,6 +26,7 @@ type Settings struct {
 	Acceptance string `json:"acceptance,omitempty"`
 	Reporter   string `json:"reporter,omitempty"`
 	Chat       string `json:"chat,omitempty"`
+	Approval   string `json:"approval,omitempty"`
 	// Variants holds the provider-specific reasoning effort per role, e.g.
 	// {"worker":"high"}. It is composed into the model reference at runtime.
 	Variants map[string]string `json:"variants,omitempty"`
@@ -87,6 +88,8 @@ func (s Settings) Set(role, model string) (Settings, error) {
 		s.Reporter = model
 	case "chat":
 		s.Chat = model
+	case "approval":
+		s.Approval = model
 	default:
 		return s, fmt.Errorf("unknown role %q (want %s)", role, strings.Join(Roles, "|"))
 	}
@@ -101,7 +104,7 @@ func (s Settings) SetVariant(role, variant string) (Settings, error) {
 		return s, fmt.Errorf("invalid variant %q", variant)
 	}
 	switch role {
-	case "planner", "worker", "reviewer", "acceptance", "reporter", "chat":
+	case "planner", "worker", "reviewer", "acceptance", "reporter", "chat", "approval":
 	default:
 		return s, fmt.Errorf("unknown role %q (want %s)", role, strings.Join(Roles, "|"))
 	}

@@ -385,7 +385,7 @@ func (s *Store) TasksForPlan(objectiveID string, version int) ([]domain.Task, er
 // activates the new version in one transaction. Doing it in steps leaves a
 // window where retired tasks have no plan that owns them.
 func (s *Store) ApplyReplan(objectiveID string, version int, spec goal.Plan, hash string,
-	supersede []domain.TaskID, reason string) (int, error) {
+	supersede []domain.TaskID, reason string, usage PlanUsage) (int, error) {
 	raw, err := json.Marshal(spec)
 	if err != nil {
 		return 0, err
@@ -397,8 +397,12 @@ func (s *Store) ApplyReplan(objectiveID string, version int, spec goal.Plan, has
 	defer tx.Rollback()
 
 	planID := fmt.Sprintf("%s-plan-v%d", objectiveID, version)
-	if _, err := tx.Exec(`INSERT INTO plans (id, objective_id, version, status, spec, hash, created_at)
-		VALUES (?, ?, ?, 'draft', ?, ?, ?)`, planID, objectiveID, version, string(raw), hash, now()); err != nil {
+	if _, err := tx.Exec(`INSERT INTO plans (id, objective_id, version, status, spec, hash,
+		prompt_chars, output_chars, prompt_tokens, output_tokens, usage_estimated, created_at)
+		VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?)`,
+		planID, objectiveID, version, string(raw), hash,
+		usage.PromptChars, usage.OutputChars, usage.PromptTokens, usage.OutputTokens,
+		boolInt(usage.UsageEstimated), now()); err != nil {
 		return 0, fmt.Errorf("create plan v%d: %w", version, err)
 	}
 	retired := 0

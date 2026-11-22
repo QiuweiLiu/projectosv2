@@ -59,8 +59,9 @@ Kernel 仍是 Task/Run/Evidence/Review 唯一权威；没有第二套 Scheduler 
   question 工具通过 OpenCode form 渲染并提交答案，解决等待问题时的卡住。
 - **桌面对话框**：WKWebView 接入 `WKUIDelegate`；confirm/alert/prompt 不再静默失败。
 - **驾驶舱状态**：派生执行中/已卡住/待执行；卡住时隐藏开始，显示任务级原因与恢复/重规划。
-- **R2 审批/回归**：三层审批（工作区规则/前缀记忆/轻量模型）、workspaceRoot 路径规范化、
-  时间戳/撤回事务、Subscribe 两阶段、evidence/compile/desktop 边界；`-race`/vet/check 通过。
+- **R2 审批/回归**：三层审批（工作区规则/前缀记忆/轻量 approval 角色）、workspaceRoot 路径
+  规范化、时间戳/撤回事务、Subscribe 两阶段、delivery out/ 原子替换、ApplyReplan PlanUsage、
+  evidence/compile/desktop 边界；`-race`/vet/check 通过。
 - **安全审查 P0/P1**：webfetch 不再自动放行；远程读 API/files 需 token，files 加 CSP
   sandbox；token 恒定时间 + Host/Origin 同端口；delivery 符号链接、verify 绝对路径、
   opencode 管道死锁、AO 超时、objective 瞬时错误缓存、rewind localOnly/Sync、evidence
@@ -80,7 +81,7 @@ Kernel 仍是 Task/Run/Evidence/Review 唯一权威；没有第二套 Scheduler 
 - 共享产物 Manifest + seed；Progress/Metrics；WKWebView Cockpit。
 
 ## Remaining
-- P1 剩余：MoveObjective/ConfirmPlan 事务、SSE Subscribe 锁、ctx 取消/进程回收、UTF-8 截断统一。
+- P1 剩余：ctx 取消/进程回收、UTF-8 截断统一；P2 清理。
 - **B/C benchmark 未运行**；Task A 只有 1 个样本，不能据此判断整体收益。
 - 磁盘满、只读挂载、SQLite WAL 损坏、OpenCode Server 退出重连未做现场注入。
 - Recovery 模型辅助诊断仅 fake backend 单元验证；真实模型质量未评估。

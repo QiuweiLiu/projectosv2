@@ -127,9 +127,9 @@ func TestListGivesPreviewsAndSkipsBinary(t *testing.T) {
 	}
 }
 
-// Writing an artifact whose final path is a symlink must fail instead of
-// overwriting the link target.
-func TestAssembleRefusesSymlinkTarget(t *testing.T) {
+// A symlink in the old out/ is never followed: the new tree is built beside
+// it and replaces out/ atomically.
+func TestAssembleReplacesSymlinkedTargetWithoutFollowingIt(t *testing.T) {
 	dir := t.TempDir()
 	outside := filepath.Join(dir, "outside.txt")
 	if err := os.WriteFile(outside, []byte("safe"), 0o644); err != nil {
@@ -157,8 +157,8 @@ func TestAssembleRefusesSymlinkTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := delivery.Assemble(st, dir); err == nil {
-		t.Fatal("assembly followed a symlinked target")
+	if _, err := delivery.Assemble(st, dir); err != nil {
+		t.Fatalf("assembly failed: %v", err)
 	}
 	raw, err := os.ReadFile(outside)
 	if err != nil {
@@ -166,6 +166,13 @@ func TestAssembleRefusesSymlinkTarget(t *testing.T) {
 	}
 	if string(raw) != "safe" {
 		t.Fatalf("outside file was overwritten: %q", raw)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "out", "a.txt"))
+	if err != nil || string(got) != "pwned" {
+		t.Fatalf("out/a.txt = %q %v", got, err)
+	}
+	if info, err := os.Lstat(filepath.Join(dir, "out", "a.txt")); err != nil || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("new out/a.txt is still a symlink: %+v %v", info, err)
 	}
 }
 
@@ -193,7 +200,7 @@ func TestListSkipsSymlinks(t *testing.T) {
 	}
 }
 
-func TestAssembleRefusesSymlinkedParent(t *testing.T) {
+func TestAssembleReplacesSymlinkedParentWithoutWritingOutside(t *testing.T) {
 	dir := t.TempDir()
 	outside := filepath.Join(dir, "outside")
 	if err := os.MkdirAll(outside, 0o755); err != nil {
@@ -219,11 +226,80 @@ func TestAssembleRefusesSymlinkedParent(t *testing.T) {
 	if _, err := st.SettleRun(store.Settlement{RunID: "r1", RunStatus: domain.RunSucceeded, Accepted: true, Result: "x"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := delivery.Assemble(st, dir); err == nil {
-		t.Fatal("assembly wrote through a symlinked parent")
+	if _, err := delivery.Assemble(st, dir); err != nil {
+		t.Fatalf("assembly failed: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(outside, "a.txt")); !os.IsNotExist(err) {
 		t.Fatalf("outside file was created: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "out", "sub", "a.txt"))
+	if err != nil || string(got) != "x" {
+		t.Fatalf("new out/sub/a.txt = %q %v", got, err)
+	}
+}
+
+func TestAssembleReplacesStaleOut(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "out"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "out", "old.txt"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(dir, "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.CreateTask(domain.Task{ID: "T1", Validator: "v", ArtifactPath: "new.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := st.Claim("T1", "r1", "fake"); !ok {
+		t.Fatal("claim")
+	}
+	if _, err := st.SettleRun(store.Settlement{RunID: "r1", RunStatus: domain.RunSucceeded, Accepted: true, Result: "new"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := delivery.Assemble(st, dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "out", "old.txt")); !os.IsNotExist(err) {
+		t.Fatalf("stale artifact survived: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "out", "new.txt"))
+	if err != nil || string(raw) != "new" {
+		t.Fatalf("new artifact = %q %v", raw, err)
+	}
+}
+
+func TestAssembleFailureKeepsOldOut(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "out"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "out", "old.txt"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(dir, "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.CreateTask(domain.Task{ID: "T1", Validator: "v", ArtifactPath: "../escape.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := st.Claim("T1", "r1", "fake"); !ok {
+		t.Fatal("claim")
+	}
+	if _, err := st.SettleRun(store.Settlement{RunID: "r1", RunStatus: domain.RunSucceeded, Accepted: true, Result: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := delivery.Assemble(st, dir); err == nil {
+		t.Fatal("escaping artifact was accepted")
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "out", "old.txt"))
+	if err != nil || string(raw) != "old" {
+		t.Fatalf("old delivery was replaced on failure: %q %v", raw, err)
 	}
 }
 

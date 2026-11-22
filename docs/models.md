@@ -18,6 +18,7 @@ Kernel --model=<provider/model> → AO session → OpenCode harness → provider
 | 角色 | 参数 |
 |---|---|
 | 规划、worker | `--model` |
+| 审批（聊天风险裁判） | `approval` 角色 |
 | reviewer | `--review-model`（缺省跟随 `--model`） |
 | acceptance | `--acceptance-model`（缺省跟随 `--model`） |
 | 汇报 / 解释 / 继续改进 | `--model`（各自的子命令） |
@@ -33,7 +34,8 @@ Workspace 模式下，`serve` 用 `KERNEL_MODELS_FILE` / `KERNEL_MODELS_CACHE` �
 `models.json` / `models-cache.json` 传给每个项目子进程；直接对项目目录运行 `goal` 时，
 也可以用这两个环境变量覆盖。
 
-聊天工作台右上角的“模型”下拉设置 `chat` 角色；旁边的“设置”打开各角色面板，
+聊天工作台右上角的“模型”下拉设置 `chat` 角色；旁边的“设置”打开各角色面板
+（含 `approval`，用于灰区审批的轻量风险裁判），
 可以分别设置 Chat / Planner / Worker / Reviewer / Acceptance / Reporter。列表来自缓存，
 “刷新列表”会重新执行 `opencode models`（遵循 `OPENCODE_BIN`）。列表为空时页面会自动刷新一次。
 Planner / Worker / Reviewer / Acceptance / Reporter 也可以在 Cockpit 的“模型”卡片里设置。
@@ -49,6 +51,7 @@ OpenCode 原生的 `provider/model#variant`：
 ```json
 {
   "worker": "opencode-go/deepseek-v4.1-flash",
+  "approval": "opencode-go/deepseek-v4.1-flash",
   "variants": { "worker": "high", "reviewer": "max" }
 }
 ```
@@ -119,7 +122,8 @@ kernel goal models --dir D                # 查看当前设置
 解析顺序：**命令行参数 > `models.json` > 内置默认（`opencode-go/deepseek-v4.1-flash`）**。
 
 内置默认由 `cmd/kernel/goal.go` 的 `defaultModel` 单点定义；改默认只改这一处。
-reviewer / acceptance 没单独设置时跟随 worker。
+reviewer / acceptance 没单独设置时跟随 worker；approval 未设置时回退到 chat 的 base model
+（不带思考强度）。
 
 界面上有「模型」卡片，五个角色各一个下拉框（规划/执行/审查/验收/汇报），
 列表来自缓存的 `opencode --standalone models`；改选后立即保存，右上角可刷新列表。

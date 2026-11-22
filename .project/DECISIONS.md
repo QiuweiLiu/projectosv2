@@ -567,3 +567,13 @@
   事务与状态校验；events 游标校验/满页续读；serve path.Clean；report/modelcfg/replan/desktop
   边界；CountReviews 排除 objective_error。
 - 验证：`go test -race`、vet、desktop check 全过；策略/规则/时间/撤回/evidence/compile 新测试。
+
+## 2026-11-22 — K-D074：交付原子替换、重规划用量、审批模型角色
+- delivery.Assemble 先在 out/ 旁建 `.out.tmp-*`，全部写入成功后用旧 out 改名备份、临时目录
+  rename 为 out；失败保留旧 out，成功清理旧树与 stale 产物。符号链接仍不跟随。
+- store.ApplyReplan / replan.Apply 接收 PlanUsage，plans 行写入 prompt/output chars/tokens 与
+  estimated；goalRun/goalReplan/goalContinue 传入 planner.Generate 的 usage。
+- modelcfg 新增 approval 角色（models.json/CLI/聊天与驾驶舱 UI），judgeRisk 优先使用它，
+  未配置回退 chat base model；无思考强度默认。
+- 验证：delivery 原子/失败保留旧树/替换 stale 测试；ApplyReplan usage 进 Metrics 测试；
+  approval 角色设置/变体测试；`go test -race`、vet、desktop check 全过。

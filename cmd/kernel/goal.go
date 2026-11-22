@@ -104,6 +104,10 @@ func resolveRoleModel(dir, role, explicit string) string {
 		if s.Reporter != "" {
 			return s.Reporter
 		}
+	case "approval":
+		if s.Approval != "" {
+			return s.Approval
+		}
 	}
 	return defaultModel
 }
@@ -867,9 +871,10 @@ func goalRun(args []string) int {
 			rp = planner.NewModel(backend)
 		}
 		var newPlan goal.Plan
+		var replanUsage store.PlanUsage
 		replanErr := error(nil)
 		for attempt := 0; attempt < 2; attempt++ {
-			planAttempt, _, err := planner.Generate(ctx, rp, planner.Request{
+			planAttempt, planResult, err := planner.Generate(ctx, rp, planner.Request{
 				Goal: obj.Goal, Constraints: obj.Constraints, Feedback: feedback,
 				MaxTasks: len(record.Spec.Tasks) + replan.MaxNewTasks,
 			}, 2)
@@ -893,6 +898,11 @@ func goalRun(args []string) int {
 				continue
 			}
 			newPlan = planAttempt
+			replanUsage = store.PlanUsage{
+				PromptChars: planResult.PromptChars, OutputChars: planResult.OutputChars,
+				PromptTokens: planResult.PromptTokens, OutputTokens: planResult.OutputTokens,
+				UsageEstimated: planResult.UsageEstimated,
+			}
 			replanErr = nil
 			break
 		}
@@ -906,7 +916,7 @@ func goalRun(args []string) int {
 			return exitError
 		}
 		version := obj.PlanVersion + 1
-		retired, err := replan.Apply(st, obj.ID, version, record.Spec, newPlan, hash)
+		retired, err := replan.Apply(st, obj.ID, version, record.Spec, newPlan, hash, replanUsage)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "replan apply:", err)
 			return exitError
@@ -1682,7 +1692,7 @@ func goalContinue(args []string) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	plan, _, err := planner.Generate(ctx, p, planner.Request{
+	plan, planResult, err := planner.Generate(ctx, p, planner.Request{
 		Goal: obj.Goal, Constraints: obj.Constraints, Feedback: feedback, MaxTasks: *maxTasks,
 		Context: *projectContext,
 	}, 2)
@@ -1716,7 +1726,11 @@ func goalContinue(args []string) int {
 	}
 	version := obj.PlanVersion + 1
 	if _, err := st.ApplyReplan(obj.ID, version, plan, hash, retire,
-		"superseded by plan v"+fmt.Sprint(version)); err != nil {
+		"superseded by plan v"+fmt.Sprint(version), store.PlanUsage{
+			PromptChars: planResult.PromptChars, OutputChars: planResult.OutputChars,
+			PromptTokens: planResult.PromptTokens, OutputTokens: planResult.OutputTokens,
+			UsageEstimated: planResult.UsageEstimated,
+		}); err != nil {
 		fmt.Fprintln(os.Stderr, "continue:", err)
 		return exitError
 	}
@@ -1839,6 +1853,7 @@ func goalModels(args []string) int {
 	show("reviewer", settings.Reviewer)
 	show("acceptance", settings.Acceptance)
 	show("reporter", settings.Reporter)
+	show("approval", settings.Approval)
 	if len(cache.Models) > 0 {
 		fmt.Printf("known models: %d (refreshed %s)\n", len(cache.Models), cache.At.Format(time.RFC3339))
 	} else {

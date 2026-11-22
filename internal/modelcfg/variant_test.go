@@ -65,3 +65,14 @@ func TestSetVariantDoesNotMutateSharedMap(t *testing.T) {
 		t.Fatalf("next map = %+v", next.Variants)
 	}
 }
+
+func TestApprovalRoleHasItsOwnModelAndVariant(t *testing.T) {
+	s, err := (Settings{}).Set("approval", "fast/model")
+	if err != nil || s.Approval != "fast/model" {
+		t.Fatalf("approval model = %q %v", s.Approval, err)
+	}
+	s, err = s.SetVariant("approval", "low")
+	if err != nil || s.Variants["approval"] != "low" {
+		t.Fatalf("approval variant = %+v %v", s.Variants, err)
+	}
+}

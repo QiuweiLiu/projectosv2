@@ -90,7 +90,7 @@ func TestApplySupersedesUnfinishedOnly(t *testing.T) {
 	}
 
 	next := plan("T1", "T3")
-	n, err := replan.Apply(st, "obj", 2, old, next, "h2")
+	n, err := replan.Apply(st, "obj", 2, old, next, "h2", store.PlanUsage{})
 	if err != nil {
 		t.Fatal(err)
 	}

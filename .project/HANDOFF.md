@@ -18,7 +18,7 @@ Evidence/Review 唯一权威，模型只提案，人在关键处确认。
 - **聊天审批/预算**：只读自动允许；输入区“帮我审批”（低风险自动、高风险弹卡）；确认异步；
   预算只填 token；建议每对话最多一次。
 - **审查修复**：webfetch/鉴权/CSP、symlink、verify、管道、AO/objective/rewind/evidence/replan；
-  R2：三层审批（规则/前缀/轻量模型）、时间/撤回事务、Subscribe 两阶段、边界修复。
+  R2三层审批（规则/前缀/模型）、时间/撤回事务、Subscribe 两阶段、delivery/PlanUsage/边界
 
 ## Verified
 - 24 包 `go test -count=1`、`vet` 全绿；`desktop --check`、`node --check` 通过。
