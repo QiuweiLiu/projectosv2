@@ -105,7 +105,11 @@ static int RunKernelTimeout(NSArray<NSString *> *arguments, NSString **output, N
     dispatch_semaphore_t readDone = dispatch_semaphore_create(0);
     __block NSData *data = nil;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        data = [pipe.fileHandleForReading readDataToEndOfFile];
+        @try {
+            data = [pipe.fileHandleForReading readDataToEndOfFile];
+        } @catch (NSException *exception) {
+            data = nil;
+        }
         dispatch_semaphore_signal(readDone);
     });
     long timedOut = dispatch_semaphore_wait(exitDone,
@@ -121,8 +125,13 @@ static int RunKernelTimeout(NSArray<NSString *> *arguments, NSString **output, N
         if (output) *output = @"kernel command timed out";
         return -2;
     }
-    dispatch_semaphore_wait(readDone, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)));
-    if (output) *output = data ? ([[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"") : @"";
+    long readWaited = dispatch_semaphore_wait(readDone,
+        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)));
+    if (output) {
+        *output = (readWaited == 0 && data)
+            ? ([[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"")
+            : @"";
+    }
     return task.terminationStatus;
 }
 
@@ -304,7 +313,7 @@ typedef NS_ENUM(NSInteger, TabState) {
 
 #pragma mark - App delegate
 
-@interface AppDelegate : NSObject <NSApplicationDelegate, WKUIDelegate>
+@interface AppDelegate : NSObject <NSApplicationDelegate, WKUIDelegate, WKNavigationDelegate>
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, strong) NSView *tabBar;
 @property(nonatomic, strong) NSView *content;
@@ -745,6 +754,7 @@ typedef NS_ENUM(NSInteger, TabState) {
         WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
         WKWebView *webView = [[WKWebView alloc] initWithFrame:self.content.bounds configuration:config];
         webView.UIDelegate = self;
+        webView.navigationDelegate = self;
         webView.translatesAutoresizingMaskIntoConstraints = NO;
         [self.content addSubview:webView];
         [NSLayoutConstraint activateConstraints:@[
@@ -834,11 +844,12 @@ typedef NS_ENUM(NSInteger, TabState) {
         NSString *pathToStop = [tab.path copy];
         dispatch_async(self.startQueue, ^{
             StopServerFor(pathToStop);
-            dispatch_async(dispatch_get_main_queue(), ^{
-                @synchronized(self.serversStarted) {
-                    [self.serversStarted removeObject:standard];
-                }
-            });
+            // Remove on the serial start queue, not after a main-queue hop:
+            // a rapid close/reopen could otherwise delete the newly started
+            // service from the set.
+            @synchronized(self.serversStarted) {
+                [self.serversStarted removeObject:standard];
+            }
         });
     }
 
@@ -990,6 +1001,17 @@ typedef NS_ENUM(NSInteger, TabState) {
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return YES; }
+
+- (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction
+    decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
+    NSURL *url = navigationAction.request.URL;
+    NSString *scheme = url.scheme.lowercaseString;
+    if ([scheme isEqualToString:@"http"] || [scheme isEqualToString:@"https"]) {
+        decisionHandler(WKNavigationActionPolicyAllow);
+        return;
+    }
+    decisionHandler(WKNavigationActionPolicyCancel);
+}
 
 - (void)webView:(WKWebView *)webView runJavaScriptAlertPanelWithMessage:(NSString *)message
     initiatedByFrame:(WKFrameInfo *)frame completionHandler:(void (^)(void))completionHandler {

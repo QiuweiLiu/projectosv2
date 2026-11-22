@@ -1243,7 +1243,7 @@ function updateAutoApprove(){
   const on = !!(state.conv && state.conv.autoApprove);
   b.textContent = '帮我审批：' + (on ? '开' : '关');
   b.classList.toggle('on', on);
-  b.title = on ? '低风险请求自动允许；高风险仍会提醒你' : '写入/命令会逐次提醒你';
+  b.title = on ? '灰区命令交给模型判断；高风险仍会提醒你' : '项目内编辑/测试/只读自动；灰区命令逐次提醒';
   b.disabled = !state.conv;
 }
 $('autoApproveBtn').onclick = async () => {
@@ -2228,7 +2228,8 @@ function renderPermission(d){
     if(!state.conv) return;
     try {
       await api('/api/conversations/'+encodeURIComponent(state.conv.id)+'/permissions/'+encodeURIComponent(d.requestId), {
-        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({decision:b.dataset.p})
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({decision:b.dataset.p, action:d.action || '', resources:d.resources || []})
       });
        el.remove();
        $('approvalInspector').innerHTML = '<div class="hint">审批已处理：'+esc(d.action || '工具调用')+'。</div>';

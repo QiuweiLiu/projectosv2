@@ -217,7 +217,8 @@ func Refresh(ctx context.Context, dir, bin string) ([]string, error) {
 		var models []string
 		for _, line := range strings.Split(string(out), "\n") {
 			line = strings.TrimSpace(line)
-			if line == "" || !strings.Contains(line, "/") || seen[line] {
+			if line == "" || !strings.Contains(line, "/") || strings.ContainsAny(line, " \t") ||
+				strings.Contains(line, "://") || seen[line] {
 				continue
 			}
 			seen[line] = true

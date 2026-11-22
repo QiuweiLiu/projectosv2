@@ -130,7 +130,7 @@ func Build(st *store.Store, obj goal.Objective) (Brief, error) {
 		brief.Next = "查看 out/ 目录或 delivery.md 了解交付内容。"
 	case obj.Status == goal.StatusFailed:
 		brief.Status = "未能完成：有任务被卡住，且没有新的替代计划。"
-		brief.Next = "看下面的「被卡住」，修好后再运行；或取消目标。"
+		brief.Next = "查看被卡住的任务，重新规划或取消目标；目标已停止，不会自动继续。"
 	case obj.Status == goal.StatusCancelled:
 		brief.Status = "已取消。"
 		brief.Next = "需要的话可以新建一个目标。"

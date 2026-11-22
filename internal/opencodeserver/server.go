@@ -81,7 +81,9 @@ type Message struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
 	Time struct {
-		Created int64 `json:"created"`
+		Created   int64 `json:"created"`
+		Streamed  int64 `json:"streamed"`
+		Completed int64 `json:"completed"`
 	} `json:"time"`
 	Content []struct {
 		Type string `json:"type"`
@@ -538,6 +540,12 @@ func (s *Server) PendingPermissions(ctx context.Context) ([]PermissionRequest, e
 	}
 	err := s.doJSON(ctx, http.MethodGet, "/api/permission/request", nil, &out)
 	return out.Data, err
+}
+
+// DeleteSession removes a temporary session (risk judge, handoff draft, etc.).
+// Older runtimes may not support it; callers ignore the error.
+func (s *Server) DeleteSession(ctx context.Context, sessionID string) error {
+	return s.doJSON(ctx, http.MethodDelete, "/api/session/"+url.PathEscape(sessionID), nil, nil)
 }
 
 func (s *Server) Interrupt(ctx context.Context, sessionID string) error {

@@ -347,12 +347,20 @@ func renderSummary(entry Entry, available int) string {
 	if entry.Trust == TrustUserConfirmed && strings.TrimSpace(entry.Content) != "" {
 		body = entry.Content
 	}
-	if entry.Trust == TrustUserConfirmed || entry.Kind == KindObjective || entry.Trust != TrustPublished {
-		text += truncateString(oneLine(body), available-len(text)-1)
-	}
+	marker := ""
 	if entry.Kind == KindArtifact {
-		text += " [content truncated]"
+		marker = " [content truncated]"
 	}
+	// Reserve the marker and the trailing newline before truncating. Budget and
+	// truncation are both byte-based and UTF-8 safe.
+	budget := available - len(text) - len(marker) - 1
+	if budget < 0 {
+		budget = 0
+	}
+	if entry.Trust == TrustUserConfirmed || entry.Kind == KindObjective || entry.Trust != TrustPublished {
+		text += truncateString(oneLine(body), budget)
+	}
+	text += marker
 	if !strings.HasSuffix(text, "\n") {
 		text += "\n"
 	}

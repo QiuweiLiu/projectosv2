@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -250,7 +251,7 @@ func serveBackground(dir, addr string, control, allowRemote bool) int {
 // readiness use it without having the token yet.
 func requireToken(next http.Handler, ctl *controlServer) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := r.URL.Path
+		p := path.Clean("/" + r.URL.Path)
 		if p != "/api/status" && (strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/files/")) {
 			if !ctl.authorised(r) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)

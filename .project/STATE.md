@@ -58,9 +58,9 @@ Kernel 仍是 Task/Run/Evidence/Review 唯一权威；没有第二套 Scheduler 
 - **对话控制**：思考过程默认展开、输入区可切换并持久化；生成中输入区/思考行可停止；
   question 工具通过 OpenCode form 渲染并提交答案，解决等待问题时的卡住。
 - **桌面对话框**：WKWebView 接入 `WKUIDelegate`；confirm/alert/prompt 不再静默失败。
-- **身份与排版**：Session 注入 ProjectOS instruction；块级 Markdown/表格/浅色代码/
-  Claude 风格行距、柔和动效；空闲后无残留思考动画。
 - **驾驶舱状态**：派生执行中/已卡住/待执行；卡住时隐藏开始，显示任务级原因与恢复/重规划。
+- **R2 审批/回归**：三层审批（工作区规则/前缀记忆/轻量模型）、workspaceRoot 路径规范化、
+  时间戳/撤回事务、Subscribe 两阶段、evidence/compile/desktop 边界；`-race`/vet/check 通过。
 - **安全审查 P0/P1**：webfetch 不再自动放行；远程读 API/files 需 token，files 加 CSP
   sandbox；token 恒定时间 + Host/Origin 同端口；delivery 符号链接、verify 绝对路径、
   opencode 管道死锁、AO 超时、objective 瞬时错误缓存、rewind localOnly/Sync、evidence

@@ -50,22 +50,25 @@ type Manager struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu        sync.Mutex
-	server    *opencodeserver.Server
-	serverErr error
-	starting  chan struct{}
-	subs      map[string]map[*subscription]struct{}
-	sessions  map[string]string // opencode session -> conversation
-	active    map[string]bool
-	suggested sync.Map // conversation -> last assistant message considered
-	eventSeen int
+	mu           sync.Mutex
+	server       *opencodeserver.Server
+	serverErr    error
+	starting     chan struct{}
+	subs         map[string]map[*subscription]struct{}
+	sessions     map[string]string // opencode session -> conversation
+	active       map[string]bool
+	suggested    sync.Map // conversation -> last assistant message considered
+	eventSeen    int
+	rulesMu      sync.Mutex
+	inflightPerm map[string]struct{}
 }
 
 func New(cfg Config, store *conversation.Store) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{cfg: cfg, store: store, ctx: ctx, cancel: cancel,
 		subs:     map[string]map[*subscription]struct{}{},
-		sessions: map[string]string{}, active: map[string]bool{}}
+		sessions: map[string]string{}, active: map[string]bool{},
+		inflightPerm: map[string]struct{}{}}
 }
 
 func (m *Manager) Close() {
@@ -354,7 +357,7 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 	return nil
 }
 
-func (m *Manager) ReplyPermission(ctx context.Context, id, requestID, decision, message string) error {
+func (m *Manager) ReplyPermission(ctx context.Context, id, requestID, decision, message, action string, resources []string) error {
 	c, ok, err := m.store.Get(id)
 	if err != nil || !ok || c.SessionID == "" {
 		return fmt.Errorf("conversation has no active session")
@@ -369,6 +372,9 @@ func (m *Manager) ReplyPermission(ctx context.Context, id, requestID, decision, 
 	if err := srv.ReplyPermission(ctx, c.SessionID, requestID, decision, message); err != nil {
 		return err
 	}
+	if decision == "always" {
+		m.recordApprovalRule(action, resources)
+	}
 	_, _ = m.persist(id, "permission_replied", map[string]string{"requestId": requestID, "decision": decision})
 	return nil
 }
@@ -382,16 +388,14 @@ const maxChatReplay = 4096
 // authoritative messages.
 func (m *Manager) Subscribe(id string, after int64) (<-chan conversation.Event, <-chan struct{}, bool, func(), error) {
 	sub := &subscription{ch: make(chan conversation.Event, maxChatReplay), done: make(chan struct{})}
-	m.mu.Lock()
-	// Query the pages while holding the publish lock so the replay cannot be
-	// interleaved with a live event before it is queued.
+	// Phase 1: page the log without the publish lock. Holding m.mu here blocked
+	// every live event in the process while SQLite was reading.
 	var replay []conversation.Event
 	cursor := after
 	gap := false
 	for {
 		page, err := m.store.EventsAfter(id, cursor, 250)
 		if err != nil {
-			m.mu.Unlock()
 			sub.close()
 			return nil, nil, false, nil, err
 		}
@@ -412,17 +416,42 @@ func (m *Manager) Subscribe(id string, after int64) (<-chan conversation.Event, 
 	if len(replay) > 0 && replay[0].Seq > after+1 {
 		gap = true
 	}
-	// A fresh subscription (after=0) does not need pruned history: messages are
-	// the authoritative history. An explicit cursor that has been pruned is a
-	// real gap and must be reported.
 	if after == 0 {
 		gap = len(replay) == 0 && gap
+	}
+
+	// Phase 2: register, then read only the short tail that arrived while the
+	// replay was being paged. Live events published after registration are
+	// queued by publish; the tail closes the gap before registration.
+	m.mu.Lock()
+	if len(m.subs[id]) >= 8 || m.subscriptionCountLocked() >= 64 {
+		m.mu.Unlock()
+		sub.close()
+		return nil, nil, false, nil, fmt.Errorf("too many chat event subscribers")
+	}
+	var delta []conversation.Event
+	if !gap {
+		delta, _ = m.store.EventsAfter(id, cursor, 500)
+		if len(delta) >= 500 {
+			// More than the bounded tail; ask the client to resync instead of
+			// blocking the publisher while replaying an unbounded burst.
+			gap = true
+			delta = nil
+		}
 	}
 	if m.subs[id] == nil {
 		m.subs[id] = map[*subscription]struct{}{}
 	}
 	m.subs[id][sub] = struct{}{}
-	for _, ev := range replay {
+	queued := make([]conversation.Event, 0, len(replay)+len(delta))
+	queued = append(queued, replay...)
+	queued = append(queued, delta...)
+	seen := map[int64]bool{}
+	for _, ev := range queued {
+		if seen[ev.Seq] {
+			continue
+		}
+		seen[ev.Seq] = true
 		sub.ch <- ev
 	}
 	m.mu.Unlock()
@@ -430,11 +459,18 @@ func (m *Manager) Subscribe(id string, after int64) (<-chan conversation.Event, 
 		m.mu.Lock()
 		if _, ok := m.subs[id][sub]; ok {
 			delete(m.subs[id], sub)
-			// Do not close ch: the HTTP handler may still be draining replay.
 		}
 		m.mu.Unlock()
 	}
 	return sub.ch, sub.done, gap, cancel, nil
+}
+
+func (m *Manager) subscriptionCountLocked() int {
+	total := 0
+	for _, set := range m.subs {
+		total += len(set)
+	}
+	return total
 }
 
 func (m *Manager) publishLive(id, kind string, data any) {
@@ -585,9 +621,36 @@ func (m *Manager) handle(ev opencodeserver.Event) {
 }
 
 func (m *Manager) handlePermission(convID, sessionID, requestID, action string, resources []string, message string) {
-	// Read-only access is part of normal chat; do not make the operator approve
-	// every file read.
-	if autoApproveReadOnly(action) {
+	key := convID + "\x00" + requestID
+	release := func() {
+		m.mu.Lock()
+		delete(m.inflightPerm, key)
+		m.mu.Unlock()
+	}
+	m.mu.Lock()
+	if _, busy := m.inflightPerm[key]; busy {
+		m.mu.Unlock()
+		return
+	}
+	if m.inflightPerm == nil {
+		m.inflightPerm = map[string]struct{}{}
+	}
+	m.inflightPerm[key] = struct{}{}
+	m.mu.Unlock()
+
+	if strings.EqualFold(strings.TrimSpace(action), "question") {
+		_, _ = m.persist(convID, "permission", map[string]any{
+			"requestId": requestID, "action": action, "resources": resources, "message": message,
+		})
+		release()
+		return
+	}
+	c, ok, _ := m.store.Get(convID)
+	decision, reason := riskAskModel, ""
+	if ok {
+		decision, reason = m.permissionDecision(c, action, resources)
+	}
+	if decision == riskAllow {
 		if srv := m.currentServer(); srv != nil && sessionID != "" {
 			ctx, cancel := context.WithTimeout(m.ctx, 10*time.Second)
 			err := srv.ReplyPermission(ctx, sessionID, requestID, "once", "")
@@ -595,59 +658,32 @@ func (m *Manager) handlePermission(convID, sessionID, requestID, action string, 
 			if err == nil {
 				_, _ = m.persist(convID, "permission_auto", map[string]any{
 					"requestId": requestID, "action": action, "resources": resources,
-					"source": "readonly",
+					"source": "policy", "risk": "low",
 				})
+				release()
 				return
 			}
 		}
 	}
-	if !strings.EqualFold(strings.TrimSpace(action), "question") {
-		if c, ok, _ := m.store.Get(convID); ok && c.AutoApprove {
-			_, _ = m.persist(convID, "permission_judging", map[string]any{
-				"requestId": requestID, "action": action, "resources": resources,
-			})
-			go m.autoJudgePermission(convID, sessionID, requestID, action, resources, message)
-			return
-		}
+	if decision == riskAskModel && ok && c.AutoApprove {
+		_, _ = m.persist(convID, "permission_judging", map[string]any{
+			"requestId": requestID, "action": action, "resources": resources,
+		})
+		go func() {
+			defer release()
+			m.autoJudgePermission(convID, sessionID, requestID, action, resources, message)
+		}()
+		return
 	}
-	_, _ = m.persist(convID, "permission", map[string]any{
+	payload := map[string]any{
 		"requestId": requestID, "action": action, "resources": resources, "message": message,
-	})
-}
-
-// deterministicRisk rejects obvious dangerous requests without asking a model.
-// This is the hard layer that prompt injection in the request cannot talk past.
-func deterministicRisk(action string, resources []string) (string, bool) {
-	if strings.EqualFold(strings.TrimSpace(action), "webfetch") {
-		return "网络请求需要人工确认", true
 	}
-	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "bash", "shell":
-		cmd := strings.ToLower(strings.Join(resources, " "))
-		for _, bad := range []string{"rm -rf", "git reset --hard", "git push --force", "git push -f",
-			"sudo ", "chmod 777", "mkfs", "dd if=", "> /dev/", "shutdown", "reboot"} {
-			if strings.Contains(cmd, bad) {
-				return "命令包含高风险操作，需要人工确认", true
-			}
-		}
-	case "edit", "write":
-		for _, resource := range resources {
-			clean := filepath.Clean(resource)
-			if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-				return "写入路径在工作区之外，需要人工确认", true
-			}
-		}
+	if decision == riskPrompt {
+		payload["risk"] = "high"
+		payload["reason"] = reason
 	}
-	return "", false
-}
-
-func autoApproveReadOnly(action string) bool {
-	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "read", "list", "glob", "grep":
-		return true
-	default:
-		return false
-	}
+	_, _ = m.persist(convID, "permission", payload)
+	release()
 }
 
 func (m *Manager) setIdle(id string, status conversation.Status, errText string) {

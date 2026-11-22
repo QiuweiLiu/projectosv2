@@ -121,10 +121,12 @@ func (m *Manager) Rewind(ctx context.Context, conversationID, messageID string, 
 	}
 	sessionID := c.SessionID
 	remoteForked := false
+	var srv *opencodeserver.Server
 	// A message without a remote id never reached OpenCode (e.g. a control
 	// phrase stored locally). There is no server-side turn to fork away.
 	if before := strings.TrimSpace(target.RemoteID); before != "" && sessionID != "" && !localOnly {
-		srv, serr := m.ensureServer(ctx)
+		var serr error
+		srv, serr = m.ensureServer(ctx)
 		if serr != nil {
 			return RewindResult{}, serr
 		}
@@ -151,29 +153,40 @@ func (m *Manager) Rewind(ctx context.Context, conversationID, messageID string, 
 			return RewindResult{}, fmt.Errorf("fork session: %w", ferr)
 		}
 	}
-	removedTarget, removed, err := m.store.Rewind(conversationID, target.ID)
+	removedTarget, removed, err := m.store.RewindWithSession(conversationID, target.ID,
+		sessionID, !remoteForked, conversation.StatusIdle)
 	if err != nil {
+		if remoteForked && srv != nil {
+			// Best effort: do not leave an orphan fork when the local transaction
+			// failed after the remote session was created.
+			cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = srv.DeleteSession(cleanup, sessionID)
+			cancel()
+		}
 		return RewindResult{}, err
 	}
-	if remoteForked {
-		if err := m.store.SetSession(conversationID, sessionID); err != nil {
-			return RewindResult{}, err
+	removedHasRemote := false
+	for _, msg := range removed {
+		if strings.TrimSpace(msg.RemoteID) != "" {
+			removedHasRemote = true
+			break
 		}
+	}
+	cleared := false
+	if remoteForked {
 		m.mu.Lock()
 		delete(m.sessions, c.SessionID)
 		m.sessions[sessionID] = conversationID
 		m.mu.Unlock()
-	} else if strings.TrimSpace(target.RemoteID) != "" {
-		// A local-only rewind of a message that once had a remote id must not
-		// let Sync pull the deleted turn back from the old session.
-		if err := m.store.SetSession(conversationID, ""); err != nil {
-			return RewindResult{}, err
-		}
+	} else if removedHasRemote {
+		// The store cleared session_id in the same transaction; mirror it.
+		sessionID = ""
+		cleared = true
 		m.mu.Lock()
 		delete(m.sessions, c.SessionID)
 		m.mu.Unlock()
 	}
-	_ = m.store.SetStatus(conversationID, conversation.StatusIdle, "")
+	_ = cleared
 	m.publishLive(conversationID, "rewind", map[string]any{
 		"messageId":    removedTarget.ID,
 		"removed":      len(removed),

@@ -1185,7 +1185,7 @@ func (s *Store) hasColumn(table, column string) (bool, error) {
 // durable so a restart cannot reset the review budget.
 func (s *Store) CountReviews() (int, error) {
 	var n int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM reviews`).Scan(&n)
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM reviews WHERE kind <> 'objective_error'`).Scan(&n)
 	return n, err
 }
 

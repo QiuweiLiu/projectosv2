@@ -169,6 +169,9 @@ func sameExecutionShape(a, b goal.PlanTask) bool {
 	}
 	da := append([]string(nil), a.Deps...)
 	db := append([]string(nil), b.Deps...)
+	if len(da) != len(db) {
+		return false
+	}
 	sort.Strings(da)
 	sort.Strings(db)
 	if strings.Join(da, "\x00") != strings.Join(db, "\x00") {

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func fixture() Index {
@@ -150,5 +151,21 @@ func TestQueryTokensKeepShortTechnicalWords(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("token %q missing from %v", want, tokens)
 		}
+	}
+}
+
+func TestRenderSummaryKeepsTruncationMarkerForPublishedArtifacts(t *testing.T) {
+	entry := Entry{ProjectID: "p", ObjectiveID: "obj", TaskID: "T1", Kind: KindArtifact,
+		Trust: TrustPublished, ArtifactPath: "a.txt", Version: "v1",
+		Title: "中文摘要", Content: strings.Repeat("内容", 100), UpdatedAt: time.Now()}
+	text := renderSummary(entry, 120)
+	if !strings.Contains(text, "[content truncated]") {
+		t.Fatalf("published summary lost the marker: %q", text)
+	}
+	if len(text) > 120 {
+		t.Fatalf("summary %d bytes exceeds budget: %q", len(text), text)
+	}
+	if !utf8.ValidString(text) {
+		t.Fatalf("summary split a UTF-8 rune: %q", text)
 	}
 }

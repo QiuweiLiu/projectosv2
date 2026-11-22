@@ -40,6 +40,7 @@ high: destructive or irreversible actions (deleting trees, hard reset, force pus
 
 Request:
 `)
+	b.WriteString("workspace_root: " + clipText(c.Dir, 500) + "\n")
 	b.WriteString("action: " + action + "\n")
 	b.WriteString("resources: " + clipText(strings.Join(resources, ", "), 600) + "\n")
 	b.WriteString("message: " + clipText(message, 400) + "\n\nConversation (most recent last):\n")
@@ -61,8 +62,8 @@ Request:
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", "", err
 	}
-	model := c.Model
-	if strings.TrimSpace(model) == "" {
+	model := strings.TrimSpace(strings.Split(c.Model, "#")[0])
+	if model == "" {
 		model = m.cfg.DefaultModel
 	}
 	sess, err := srv.CreateSessionWithPolicy(ctx, "Permission risk", model, dir,
@@ -70,35 +71,19 @@ Request:
 	if err != nil {
 		return "", "", err
 	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.DeleteSession(cleanup, sess.ID)
+	}()
 	if _, err := srv.Prompt(ctx, sess.ID, b.String(), ""); err != nil {
 		return "", "", err
 	}
-	deadline := time.Now().Add(45 * time.Second)
-	text := ""
-	for time.Now().Before(deadline) {
-		read, rerr := srv.Messages(ctx, sess.ID, 20)
-		if rerr != nil {
-			return "", "", rerr
-		}
-		for _, msg := range read {
-			if msg.Type != "assistant" {
-				continue
-			}
-			var out strings.Builder
-			for _, part := range msg.Content {
-				if part.Type == "text" {
-					out.WriteString(part.Text)
-				}
-			}
-			if out.Len() > 0 {
-				text = out.String()
-				break
-			}
-		}
-		if text != "" {
-			break
-		}
-		time.Sleep(400 * time.Millisecond)
+	text, err := waitRiskText(ctx, func() ([]opencodeserver.Message, error) {
+		return srv.Messages(ctx, sess.ID, 20)
+	}, 45*time.Second)
+	if err != nil {
+		return "", "", err
 	}
 	raw := firstJSONObject(text)
 	if raw == "" {
@@ -127,17 +112,55 @@ Request:
 	return risk, clipText(strings.TrimSpace(parsed.Reason), 240), nil
 }
 
+// waitRiskText waits for a complete assistant message, not the first streamed
+// fragment. A partial JSON object parsed early would be discarded and turn a
+// low-risk request into a manual card.
+func waitRiskText(ctx context.Context, fetch func() ([]opencodeserver.Message, error), timeout time.Duration) (string, error) {
+	end := time.Now().Add(timeout)
+	for time.Now().Before(end) {
+		read, err := fetch()
+		if err != nil {
+			return "", err
+		}
+		text := ""
+		complete := false
+		for _, msg := range read {
+			if msg.Type == "idle" {
+				complete = true
+				continue
+			}
+			if msg.Type != "assistant" {
+				continue
+			}
+			var out strings.Builder
+			for _, part := range msg.Content {
+				if part.Type == "text" {
+					out.WriteString(part.Text)
+				}
+			}
+			if out.Len() > 0 {
+				text = out.String()
+				if msg.Time.Completed > 0 {
+					complete = true
+				}
+			}
+		}
+		if complete && text != "" {
+			return text, nil
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return "", fmt.Errorf("模型判断超时")
+}
+
 // autoJudgePermission runs after a permission.asked event when the operator
 // enabled "帮我审批". Low risk is approved once; high risk becomes a normal
 // approval card, including the model's reason.
 func (m *Manager) autoJudgePermission(conversationID, sessionID, requestID, action string, resources []string, message string) {
-	if reason, high := deterministicRisk(action, resources); high {
-		_, _ = m.persist(conversationID, "permission", map[string]any{
-			"requestId": requestID, "action": action, "resources": resources, "message": message,
-			"risk": "high", "reason": reason,
-		})
-		return
-	}
 	ctx, cancel := context.WithTimeout(m.ctx, 90*time.Second)
 	defer cancel()
 	risk, reason, err := m.judgeRisk(ctx, conversationID, action, resources, message)

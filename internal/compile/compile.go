@@ -90,7 +90,9 @@ func prompt(t goal.PlanTask) string {
 	if len(t.Artifacts) > 0 {
 		artifact = t.Artifacts[0]
 	}
-	b.WriteString("\nRequired artifact: write " + artifact + " in the current working directory.")
+	if artifact != "" {
+		b.WriteString("\nRequired artifact: write " + artifact + " in the current working directory.")
+	}
 	if len(t.Acceptance) > 0 {
 		b.WriteString("\nAcceptance criteria: " + strings.Join(t.Acceptance, "; "))
 	}

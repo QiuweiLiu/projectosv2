@@ -267,14 +267,16 @@ func chatPermission(w http.ResponseWriter, r *http.Request, mgr *chat.Manager, i
 		return
 	}
 	var req struct {
-		Decision string `json:"decision"`
-		Message  string `json:"message"`
+		Decision  string   `json:"decision"`
+		Message   string   `json:"message"`
+		Action    string   `json:"action"`
+		Resources []string `json:"resources"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&req); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
-	if err := mgr.ReplyPermission(r.Context(), id, requestID, req.Decision, req.Message); err != nil {
+	if err := mgr.ReplyPermission(r.Context(), id, requestID, req.Decision, req.Message, req.Action, req.Resources); err != nil {
 		if errors.Is(err, opencodeserver.ErrPermissionNotFound) {
 			http.Error(w, "permission not found", http.StatusNotFound)
 			return

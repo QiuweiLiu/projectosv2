@@ -287,7 +287,11 @@ func migrateGoalDrafts(db *sql.DB) error {
 	return nil
 }
 
-func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }
+// timeFormat is fixed-width so mixed rows can be compared lexically when needed;
+// callers that already have historical RFC3339Nano rows still parse them.
+const timeFormat = "2006-01-02T15:04:05.000000000Z"
+
+func now() string { return time.Now().UTC().Format(timeFormat) }
 
 func parseTime(raw string) time.Time {
 	t, _ := time.Parse(time.RFC3339Nano, raw)
@@ -625,6 +629,19 @@ func (s *Store) MessageByID(conversationID, id string) (Message, bool, error) {
 // conversation events that would replay those messages. Callers must fork the
 // model session before calling this, so the model context is rolled back too.
 func (s *Store) Rewind(conversationID, messageID string) (Message, []Message, error) {
+	return s.rewind(conversationID, messageID, "", false, "")
+}
+
+// RewindWithSession performs the transcript deletion and the session/status
+// update in one transaction. clearOnRemote clears session_id when any removed
+// message had a remote id; otherwise sessionID (when non-empty) is stored.
+func (s *Store) RewindWithSession(conversationID, messageID, sessionID string,
+	clearOnRemote bool, status Status) (Message, []Message, error) {
+	return s.rewind(conversationID, messageID, sessionID, clearOnRemote, status)
+}
+
+func (s *Store) rewind(conversationID, messageID, sessionID string,
+	clearOnRemote bool, status Status) (Message, []Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -674,16 +691,21 @@ func (s *Store) Rewind(conversationID, messageID string) (Message, []Message, er
 	// already pruned, drop the whole event log: replaying old turns after a
 	// rewind is worse than losing old tool cards.
 	cutoff := int64(0)
-	evRows, err := tx.Query(`SELECT seq,kind,data FROM events WHERE conversation_id=? ORDER BY seq`, conversationID)
+	firstByTime := int64(0)
+	evRows, err := tx.Query(`SELECT seq,kind,data,at FROM events WHERE conversation_id=? ORDER BY seq`, conversationID)
 	if err != nil {
 		return Message{}, nil, err
 	}
 	for evRows.Next() {
 		var seq int64
-		var kind, data string
-		if err := evRows.Scan(&seq, &kind, &data); err != nil {
+		var kind, data, at string
+		if err := evRows.Scan(&seq, &kind, &data, &at); err != nil {
 			evRows.Close()
 			return Message{}, nil, err
+		}
+		if parsed, perr := time.Parse(time.RFC3339Nano, at); perr == nil &&
+			!parsed.Before(target.CreatedAt) && (firstByTime == 0 || seq < firstByTime) {
+			firstByTime = seq
 		}
 		if kind != "user" {
 			continue
@@ -698,17 +720,11 @@ func (s *Store) Rewind(conversationID, messageID string) (Message, []Message, er
 	}
 	evRows.Close()
 	if cutoff == 0 {
-		// The user event may have been pruned. Cut by the target message's
-		// timestamp instead of deleting the entire event log (which would erase
-		// unrelated history).
-		var first sql.NullInt64
-		if err := tx.QueryRow(`SELECT MIN(seq) FROM events WHERE conversation_id=? AND at>=?`,
-			conversationID, target.CreatedAt.Format(time.RFC3339Nano)).Scan(&first); err != nil {
-			return Message{}, nil, err
-		}
-		if first.Valid {
-			cutoff = first.Int64
-		} else {
+		// The user event may have been pruned. Use the parsed timestamps from
+		// the scan above, never SQLite string comparison: RFC3339Nano rows with
+		// and without fractional seconds do not sort lexically.
+		cutoff = firstByTime
+		if cutoff == 0 {
 			var maxSeq sql.NullInt64
 			if err := tx.QueryRow(`SELECT MAX(seq) FROM events WHERE conversation_id=?`, conversationID).Scan(&maxSeq); err != nil {
 				return Message{}, nil, err
@@ -725,6 +741,28 @@ func (s *Store) Rewind(conversationID, messageID string) (Message, []Message, er
 	}
 	if _, err := tx.Exec(`DELETE FROM messages WHERE conversation_id=? AND rowid>=?`, conversationID, rowID); err != nil {
 		return Message{}, nil, err
+	}
+	removedHasRemote := false
+	for _, msg := range removed {
+		if strings.TrimSpace(msg.RemoteID) != "" {
+			removedHasRemote = true
+			break
+		}
+	}
+	switch {
+	case clearOnRemote && removedHasRemote:
+		if _, err := tx.Exec(`UPDATE conversations SET session_id='', updated_at=? WHERE id=?`, now(), conversationID); err != nil {
+			return Message{}, nil, err
+		}
+	case sessionID != "":
+		if _, err := tx.Exec(`UPDATE conversations SET session_id=?, updated_at=? WHERE id=?`, sessionID, now(), conversationID); err != nil {
+			return Message{}, nil, err
+		}
+	}
+	if status != "" {
+		if _, err := tx.Exec(`UPDATE conversations SET status=?, updated_at=? WHERE id=?`, string(status), now(), conversationID); err != nil {
+			return Message{}, nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return Message{}, nil, err

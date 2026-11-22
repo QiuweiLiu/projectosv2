@@ -383,15 +383,55 @@ func TestDetachObjectiveClearsConversationLink(t *testing.T) {
 	}
 }
 
-func TestAutoApproveReadOnlyActions(t *testing.T) {
-	for _, action := range []string{"read", "list", "grep", "glob", "READ"} {
-		if !autoApproveReadOnly(action) {
-			t.Fatalf("%q should be auto-approved", action)
-		}
+func TestApprovalRuleAllowsPrefixButBlacklistWins(t *testing.T) {
+	root := t.TempDir()
+	m := &Manager{cfg: Config{Root: root}}
+	c := conversation.Conversation{Dir: root}
+	m.recordApprovalRule("bash", []string{"make test"})
+	if got, _ := m.permissionDecision(c, "bash", []string{"make test"}); got != riskAllow {
+		t.Fatalf("remembered prefix = %d, want allow", got)
 	}
-	for _, action := range []string{"edit", "bash", "shell", "webfetch", "WEBFETCH", "question", ""} {
-		if autoApproveReadOnly(action) {
-			t.Fatalf("%q must still ask", action)
+	m.recordApprovalRule("bash", []string{"rm -rf /tmp/x"})
+	if got, _ := m.permissionDecision(c, "bash", []string{"rm -rf /tmp/x"}); got != riskPrompt {
+		t.Fatalf("blacklist after remembered rule = %d, want prompt", got)
+	}
+}
+
+func TestPermissionDecisionPolicy(t *testing.T) {
+	root := t.TempDir()
+	m := &Manager{cfg: Config{Root: root}}
+	c := conversation.Conversation{Dir: root}
+	cases := []struct {
+		action    string
+		resources []string
+		want      riskDecision
+	}{
+		{"edit", []string{"internal/app/main.go"}, riskAllow},
+		{"edit", []string{filepath.Join(root, "a.txt")}, riskAllow},
+		{"edit", []string{filepath.Join(root, ".env")}, riskPrompt},
+		{"edit", []string{"/etc/passwd"}, riskPrompt},
+		{"write", []string{"../outside.txt"}, riskPrompt},
+		{"read", []string{"docs/a.md"}, riskAllow},
+		{"read", []string{"/etc/passwd"}, riskPrompt},
+		{"webfetch", []string{"http://127.0.0.1:8799/api/status"}, riskPrompt},
+		{"bash", []string{"go test ./..."}, riskAllow},
+		{"bash", []string{"go test ./internal/..."}, riskAllow},
+		{"bash", []string{"go test ../outside"}, riskPrompt},
+		{"bash", []string{"npm run build"}, riskAllow},
+		{"bash", []string{"npm run deploy"}, riskAskModel},
+		{"bash", []string{"rm -rf /tmp/x"}, riskPrompt},
+		{"bash", []string{"rm -fr /tmp/x"}, riskPrompt},
+		{"bash", []string{"sudo\tls"}, riskPrompt},
+		{"bash", []string{"git push --force origin main"}, riskPrompt},
+		{"bash", []string{"git reset --hard HEAD~1"}, riskPrompt},
+		{"bash", []string{"cat .env"}, riskPrompt},
+		{"bash", []string{"find . -exec rm {} ;"}, riskPrompt},
+		{"bash", []string{"some-unknown-tool --flag"}, riskAskModel},
+	}
+	for _, tc := range cases {
+		got, _ := m.permissionDecision(c, tc.action, tc.resources)
+		if got != tc.want {
+			t.Fatalf("%s %v = %d, want %d", tc.action, tc.resources, got, tc.want)
 		}
 	}
 }
@@ -421,30 +461,74 @@ func TestLocalOnlyRewindClearsOldSessionForRemoteMessage(t *testing.T) {
 	}
 }
 
-func TestDeterministicRiskRejectsObviousHighRisk(t *testing.T) {
-	for _, tc := range []struct {
-		action    string
-		resources []string
-	}{
-		{"webfetch", []string{"http://127.0.0.1:8799/api/status"}},
-		{"bash", []string{"rm -rf /tmp/x"}},
-		{"shell", []string{"git reset --hard HEAD~1"}},
-		{"edit", []string{"/etc/passwd"}},
-		{"edit", []string{"../outside.txt"}},
-	} {
-		if reason, high := deterministicRisk(tc.action, tc.resources); !high || reason == "" {
-			t.Fatalf("%s %v was not high risk", tc.action, tc.resources)
-		}
+func TestLocalOnlyRewindClearsSessionWhenLaterMessageHadRemoteID(t *testing.T) {
+	m, st, c := testManager(t)
+	target, err := st.AppendMessage(c.ID, "user", "local note")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range []struct {
-		action    string
-		resources []string
-	}{
-		{"bash", []string{"python3 -m pytest"}},
-		{"edit", []string{"internal/app/main.go"}},
-	} {
-		if _, high := deterministicRisk(tc.action, tc.resources); high {
-			t.Fatalf("%s %v was marked high risk", tc.action, tc.resources)
+	assistant, err := st.AppendMessage(c.ID, "assistant", "remote answer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetRemoteID(assistant.ID, "msg_remote_2"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := m.Rewind(context.Background(), c.ID, target.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Session != "" {
+		t.Fatalf("returned stale session %q", res.Session)
+	}
+	got, _, _ := st.Get(c.ID)
+	if got.SessionID != "" {
+		t.Fatalf("session survived: %q", got.SessionID)
+	}
+}
+
+func riskMessage(text string, completed int64) opencodeserver.Message {
+	var m opencodeserver.Message
+	m.Type = "assistant"
+	m.Time.Completed = completed
+	m.Content = append(m.Content, struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}{Type: "text", Text: text})
+	return m
+}
+
+func TestWaitRiskTextDoesNotStopOnAStreamedFragment(t *testing.T) {
+	calls := 0
+	fetch := func() ([]opencodeserver.Message, error) {
+		calls++
+		if calls == 1 {
+			return []opencodeserver.Message{riskMessage(`{"risk":`, 0)}, nil
 		}
+		return []opencodeserver.Message{riskMessage(`{"risk":"low","reason":"ok"}`, 1)}, nil
+	}
+	text, err := waitRiskText(context.Background(), fetch, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls < 2 {
+		t.Fatalf("stopped on a partial fragment: calls=%d text=%q", calls, text)
+	}
+	if text != `{"risk":"low","reason":"ok"}` {
+		t.Fatalf("text = %q", text)
+	}
+}
+
+func TestWaitRiskTextAcceptsAnIdleMarker(t *testing.T) {
+	var idle opencodeserver.Message
+	idle.Type = "idle"
+	calls := 0
+	fetch := func() ([]opencodeserver.Message, error) {
+		calls++
+		return []opencodeserver.Message{riskMessage(`{"risk":"high"}`, 0), idle}, nil
+	}
+	text, err := waitRiskText(context.Background(), fetch, 2*time.Second)
+	if err != nil || text != `{"risk":"high"}` || calls != 1 {
+		t.Fatalf("text=%q calls=%d err=%v", text, calls, err)
 	}
 }

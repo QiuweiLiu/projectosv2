@@ -556,3 +556,14 @@
   hash、先清低信任内容再算预算、首条安全截断、短技术词保留；审批加确定性高风险规则并复用
   reconcile 路径；建议去重改 SQL EXISTS；compile/delivery/diff/modelcfg/report 边界修复。
 - 验证：`go test -race -count=1 ./...`、`go vet ./...`、desktop `--check` 全通过。
+
+## 2026-11-22 — K-D073：三层审批与 R2 回归修复
+- 审批三层：本地规则（workspaceRoot 路径规范化、复合命令拆分、严格黑名单、开发白名单）→
+  工作区 approval-rules.json 前缀记忆（always）→ 轻量模型风险分类（仅灰区，AutoApprove 开启）；
+  黑名单优先于记忆与白名单；webfetch/越界/凭据始终人工。
+- 修复：时间戳固定纳秒 + Rewind 解析比较；localOnly 按 removed 是否含 remote 清 session 并
+  返回正确 session；桌面管道读取检查超时、停止移入 startQueue；evidence 截断标记/预算；
+  compile 空产物；Subscribe 两阶段 + 订阅上限 + inflightPerm；Rewind/Move/Confirm/ApplyReplan
+  事务与状态校验；events 游标校验/满页续读；serve path.Clean；report/modelcfg/replan/desktop
+  边界；CountReviews 排除 objective_error。
+- 验证：`go test -race`、vet、desktop check 全过；策略/规则/时间/撤回/evidence/compile 新测试。

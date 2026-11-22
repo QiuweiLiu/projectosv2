@@ -33,6 +33,6 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+codesign --force --deep --sign - "$APP" >/dev/null
 echo "built $APP"
 echo "run: open \"$APP\""

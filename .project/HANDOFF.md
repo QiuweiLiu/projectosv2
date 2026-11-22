@@ -9,18 +9,16 @@ Evidence/Review 唯一权威，模型只提案，人在关键处确认。
 - **P6.0–P6.3**：Manifest 版本锁、Evidence 预算/等级、故障注入、分页、Task A 对照。
 - **工作台**：蓝白三栏 + 四 Tab + 块级 Markdown/柔和动效；窄窗 header 换行。
 - **多标签**：独立 serve/端口/WKWebView；iCloud 下载提示；关闭只停自身；原生对话框
-- **模型**：6 角色模型 + 思考强度（`provider/model#variant`）；`OPENCODE_BIN`；自动发现 CLI。
+- **模型**：6 角色 + 思考强度（`provider/model#variant`）；`OPENCODE_BIN`。
 - **对话控制**：思考展开/折叠；生成中三处停止；Session 注入 ProjectOS 身份；
   托管前先停生成、清审批；审批 404 内联提示；启动清理遗留 running。
-- **聊天托管**：短句 → 内联草稿（目标+token）→ 目标+计划 → 底部流程 dock；
-  未执行可改目标，已执行可 replan。
+- **聊天托管**：短句 → 内联草稿（目标+token）→ 目标+计划 → 流程 dock；可改目标/replan。
 - **撤回**：先停止再 fork 到目标消息前；消息不在远端时只回退本地并提示。
-- **驾驶舱**：派生执行中/已卡住/待执行；卡住时隐藏开始，顶部“需要你处理”；`goal replan`
-  真正替换未完成任务。
+- **驾驶舱**：派生执行中/已卡住/待执行；卡住时隐藏开始，顶部“需要你处理”。
 - **聊天审批/预算**：只读自动允许；输入区“帮我审批”（低风险自动、高风险弹卡）；确认异步；
   预算只填 token；建议每对话最多一次。
-- **审查修复**：webfetch/远程读鉴权/CSP、symlink、verify、opencode 管道、AO/objective/
-  rewind/evidence/replan/review 等 P0/P1。
+- **审查修复**：webfetch/鉴权/CSP、symlink、verify、管道、AO/objective/rewind/evidence/replan；
+  R2：三层审批（规则/前缀/轻量模型）、时间/撤回事务、Subscribe 两阶段、边界修复。
 
 ## Verified
 - 24 包 `go test -count=1`、`vet` 全绿；`desktop --check`、`node --check` 通过。
@@ -33,8 +31,8 @@ Evidence/Review 唯一权威，模型只提案，人在关键处确认。
   目标自动断开；取消目标不再进入聊天证据，已验收产物仍保留。
 - 审批/预算：只读自动通过；帮我审批低风险自动、高风险弹卡；确认异步、计划可重试；
   预算只填 token；建议每对话最多一次。
-- 审查修复：`go test -race`、vet、desktop check 全过；P0/P1 新增测试覆盖鉴权/CSP/管道/
-  rewind/evidence/replan。
+- 审查修复：`go test -race`、vet、desktop check 全过；P0/P1/R2 新增测试覆盖鉴权/CSP/
+  审批规则、管道、事务、rewind/evidence/replan。
 - 重规划：真实目标 v1 7 blocked → v2 4 pending；fake 测试覆盖替换/无操作；同产物复用审查结论。
 - 驾驶舱：7 任务目标显示已卡住、6 条中文原因、恢复/重规划；run/pause 隐藏。
 - 模型/身份/排版/多标签/撤回/问题表单按既有场景复验。

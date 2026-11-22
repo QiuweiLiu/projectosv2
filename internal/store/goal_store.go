@@ -149,8 +149,20 @@ func (s *Store) MoveObjective(id string, next goal.Status) error {
 	if !o.Status.CanMoveTo(next) {
 		return fmt.Errorf("objective %s cannot move %s -> %s", id, o.Status, next)
 	}
-	_, err = s.db.Exec(`UPDATE objectives SET status=?, updated_at=? WHERE id=?`, string(next), now(), id)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE objectives SET status=?, updated_at=? WHERE id=? AND status=?`,
+		string(next), now(), id, string(o.Status))
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("objective %s changed while moving to %s", id, next)
+	}
+	return tx.Commit()
 }
 
 func (s *Store) BumpObjectivePlan(id string, version int) error {
@@ -206,9 +218,14 @@ func (s *Store) confirmTx(objID string, version int) error {
 		objID, version); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE objectives SET plan_version=?, status=?, updated_at=? WHERE id=?`,
-		version, string(goal.StatusActive), now(), objID); err != nil {
+	res, err = tx.Exec(`UPDATE objectives SET plan_version=?, status=?, updated_at=?
+		WHERE id=? AND status IN ('draft','planned','active')`,
+		version, string(goal.StatusActive), now(), objID)
+	if err != nil {
 		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("objective %s is no longer confirmable", objID)
 	}
 	return tx.Commit()
 }
@@ -406,9 +423,14 @@ func (s *Store) ApplyReplan(objectiveID string, version int, spec goal.Plan, has
 		WHERE objective_id=? AND version<>? AND status='confirmed'`, objectiveID, version); err != nil {
 		return 0, err
 	}
-	if _, err := tx.Exec(`UPDATE objectives SET plan_version=?, status=?, updated_at=? WHERE id=?`,
-		version, string(goal.StatusActive), now(), objectiveID); err != nil {
+	res, err = tx.Exec(`UPDATE objectives SET plan_version=?, status=?, updated_at=?
+		WHERE id=? AND status IN ('active','failed')`,
+		version, string(goal.StatusActive), now(), objectiveID)
+	if err != nil {
 		return 0, err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return 0, fmt.Errorf("objective %s is not replannable", objectiveID)
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, err

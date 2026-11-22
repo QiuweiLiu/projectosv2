@@ -26,10 +26,23 @@ func serveEventStream(w http.ResponseWriter, r *http.Request, ws *workspace) {
 		return
 	}
 	defer st.Close()
-	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	after := int64(0)
+	if raw := r.URL.Query().Get("after"); raw != "" {
+		parsed, perr := strconv.ParseInt(raw, 10, 64)
+		if perr != nil || parsed < 0 {
+			http.Error(w, "after must be a non-negative integer", http.StatusBadRequest)
+			return
+		}
+		after = parsed
+	}
 	if after == 0 {
 		if raw := r.Header.Get("Last-Event-ID"); raw != "" {
-			after, _ = strconv.ParseInt(raw, 10, 64)
+			parsed, perr := strconv.ParseInt(raw, 10, 64)
+			if perr != nil || parsed < 0 {
+				http.Error(w, "Last-Event-ID must be a non-negative integer", http.StatusBadRequest)
+				return
+			}
+			after = parsed
 		}
 	}
 	flusher, ok := w.(http.Flusher)
@@ -58,6 +71,9 @@ func serveEventStream(w http.ResponseWriter, r *http.Request, ws *workspace) {
 		}
 		if len(events) > 0 {
 			flusher.Flush()
+		}
+		if len(events) == 100 {
+			continue // full page: fetch the next one immediately
 		}
 		select {
 		case <-r.Context().Done():
