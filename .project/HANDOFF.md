@@ -33,7 +33,7 @@ Evidence/Review 唯一权威，模型只提案，人在关键处确认。
 - 聊天消息保留 1000、事件 500；Windows/Linux、日志轮转、桌面签名未做。
 
 ## Active
-- 工作副本 `~/dev/projectosv2`，HEAD 见 `git log`（本轮已 push）。
+- 工作副本 `~/dev/projectosv2`，HEAD `1bcaf96`（已 push）。
 - 本轮提交：`desktop/main.m`、`docs/chat.md`、
   `internal/chat/{policy,approve,rewind,manager_test,approve_test}.go`、
   `internal/delivery/{report,assemble_test}.go`、`internal/evidence/*`、控制面。
