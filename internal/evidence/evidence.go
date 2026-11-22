@@ -4,6 +4,7 @@
 package evidence
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"sort"
 	"strings"
@@ -145,17 +146,30 @@ func Select(idx Index, query string, maxChars int) Bundle {
 	seen := map[string]bool{}
 	for _, candidate := range candidates {
 		entry := candidate.entry
-		key := fmt.Sprintf("%s\x00%s\x00%s\x00%s", entry.ObjectiveID, entry.TaskID, entry.ArtifactPath, entry.Version)
+		sum := sha256.Sum256([]byte(entry.Content))
+		key := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%x",
+			entry.ObjectiveID, entry.TaskID, entry.ArtifactPath, entry.Version,
+			entry.Kind, entry.Title, sum[:8])
 		if seen[key] {
-			continue
-		}
-		cost := len(entry.Title) + len(entry.ArtifactPath) + len(entry.Content) + 120
-		if used+cost > maxChars && len(b.Entries) > 0 {
-			b.Truncated = true
 			continue
 		}
 		if !trustHasContent(entry.Trust) {
 			entry.Content = ""
+		}
+		cost := len(entry.Title) + len(entry.ArtifactPath) + len(entry.Content) + 120
+		if used+cost > maxChars {
+			b.Truncated = true
+			if len(b.Entries) > 0 {
+				continue
+			}
+			// The first entry may be larger than the whole budget. Keep its
+			// provenance and truncate the body safely after runes, not bytes.
+			allowed := maxChars - used - len(entry.Title) - len(entry.ArtifactPath) - 120
+			if allowed < 0 {
+				allowed = 0
+			}
+			entry.Content = truncateString(entry.Content, allowed)
+			cost = len(entry.Title) + len(entry.ArtifactPath) + len(entry.Content) + 120
 		}
 		seen[key] = true
 		b.Entries = append(b.Entries, entry)
@@ -314,7 +328,6 @@ func renderSummary(entry Entry, available int) string {
 			if entry.ContentHash != "" {
 				prefix += " sha256=" + shortHash(entry.ContentHash)
 			}
-			prefix += " [content truncated]"
 		}
 	case TrustInProgress:
 		prefix = "- IN PROGRESS: " + oneLine(entry.ObjectiveID) + " [" + oneLine(entry.Status) + "] "
@@ -327,8 +340,18 @@ func renderSummary(entry Entry, available int) string {
 		return ""
 	}
 	text := prefix
+	if !strings.HasSuffix(text, " ") {
+		text += " "
+	}
+	body := entry.Title
+	if entry.Trust == TrustUserConfirmed && strings.TrimSpace(entry.Content) != "" {
+		body = entry.Content
+	}
 	if entry.Trust == TrustUserConfirmed || entry.Kind == KindObjective || entry.Trust != TrustPublished {
-		text += truncateString(oneLine(entry.Title), available-len(prefix)-1)
+		text += truncateString(oneLine(body), available-len(text)-1)
+	}
+	if entry.Kind == KindArtifact {
+		text += " [content truncated]"
 	}
 	if !strings.HasSuffix(text, "\n") {
 		text += "\n"
@@ -376,7 +399,7 @@ func queryTokens(query string) []string {
 	seen := map[string]bool{}
 	var word []rune
 	flush := func() {
-		if len(word) >= 3 {
+		if len(word) >= 2 {
 			token := string(word)
 			if !seen[token] {
 				seen[token] = true

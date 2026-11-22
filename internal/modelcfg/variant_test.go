@@ -51,3 +51,17 @@ func TestWithVariant(t *testing.T) {
 		t.Fatalf("empty model stays empty, got %q", got)
 	}
 }
+
+func TestSetVariantDoesNotMutateSharedMap(t *testing.T) {
+	base := Settings{Variants: map[string]string{"worker": "high"}}
+	next, err := base.SetVariant("reviewer", "max")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(base.Variants) != 1 || base.Variants["reviewer"] != "" {
+		t.Fatalf("source map mutated: %+v", base.Variants)
+	}
+	if next.Variants["reviewer"] != "max" || next.Variants["worker"] != "high" {
+		t.Fatalf("next map = %+v", next.Variants)
+	}
+}

@@ -736,7 +736,10 @@ func goalRun(args []string) int {
 			if jerr != nil {
 				fmt.Fprintln(os.Stderr, "objective acceptance:", jerr)
 				_ = st.AppendEvent("", "objective_acceptance_error", jerr.Error())
-				return failGoal(st, obj, current)
+				// Transient judge failure: keep the objective active so a later
+				// run can retry; do not convert it to a permanent failure.
+				_, _ = pruneWork(*dir, *keepWork)
+				return exitBlocked
 			}
 			if blocked {
 				fmt.Fprintln(os.Stderr, "objective acceptance: the delivered set does not fulfil the original goal")

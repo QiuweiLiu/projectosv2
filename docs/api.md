@@ -17,14 +17,14 @@ kernel serve --dir D --status               # pid / addr / control / alive
 kernel serve --dir D --stop                 # 停掉 HTTP 服务
 ```
 
-会话文件 `D/serve.json` 记录 `pid / addr / control / started`；日志在
+会话文件 `D/serve.json` 记录 `pid / addr / control / started / instance`；日志在
 `D/serve.log`。token 在 `D/control-token`（0600，重启后保持不变）。
 
 `--stop` **只停客户端**：已经由它启动的 `goal run` 在独立会话中继续执行，
 不会被终止；要中止任务必须用 `kernel goal cancel`。这是
 「关闭客户端不影响已托管任务」的实现方式，也是它的验收方式。
 
-## 2. 读接口（不需要 token）
+## 2. 读接口（本地不需要 token；`--allow-remote` 时除 `/api/status` 外都需要 token）
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -36,7 +36,12 @@ kernel serve --dir D --stop                 # 停掉 HTTP 服务
 | GET | `/api/diff?objective=…&task=…` | 最新尝试 vs 上次交付/上一尝试的文本 diff |
 | GET | `/api/models` | 各角色模型设置 + 缓存的模型列表 |
 | GET | `/api/report?objective=…` | 中文汇报（模型版优先）+ 成果文件列表 |
-| GET | `/files/{objective}/{path}` | 只读读取该目标 `out/` 下的文件；支持 Range |
+| GET | `/api/jobs` | 各目标最近一次动作的状态（内存态，非权威） |
+| GET | `/api/projects` | Project 目录（默认项目 + 已创建项目） |
+| GET | `/api/projects/{id}` | 重建并返回项目级 `.project` 快照 |
+| GET | `/api/objectives/{id}/progress` | 确定性状态、failure 分类、恢复预算（不调用模型） |
+| GET | `/api/objectives/{id}/metrics` | 任务/运行/审查/分角色 token/墙钟与累计耗时 |
+| GET | `/files/{objective}/{path}` | 只读读取该目标 `out/` 下的文件；响应带 CSP sandbox，禁止脚本访问 Kernel 同源 API；支持 Range |
 
 计数来自任务状态，不来自 Agent 自报。
 
@@ -50,21 +55,17 @@ kernel serve --dir D --stop                 # 停掉 HTTP 服务
 | POST | `/api/objectives/{id}/cancel` | `{reason}`，协作式取消 |
 | POST | `/api/objectives/{id}/pause` | 请求调度器暂停启动新任务；当前 Run 会继续完成 |
 | POST | `/api/objectives/{id}/unpause` | 移除暂停标记，调度器继续 |
-| POST | `/api/models` | `{role,model}` 保存一个角色；`{refresh:true}` 刷新模型列表（需 token） |
+| POST | `/api/models` | `{role,model}` 保存一个角色；`{role,variant}` 设置思考强度；`{refresh:true}` 刷新模型列表（需 token） |
 | POST | `/api/objectives/{id}/report` | 让模型重写汇报（写入 `report.md`） |
 | POST | `/api/objectives/{id}/continue` | `{goal}`：在已完成/失败的目标上追加任务，生成新计划版本 |
 | POST | `/api/tasks/{id}/explain?objective=…` | 让汇报人把该任务的审查意见翻成中文（按 findings 哈希缓存） |
-| GET | `/api/jobs` | 各目标最近一次动作的状态（内存态，非权威） |
-| GET | `/api/projects` | Project 目录（默认项目 + 已创建项目） |
 | POST | `/api/projects` | `{name,description}` 创建 Project 元数据 |
-| GET | `/api/projects/{id}` | 重建并返回项目级 `.project` 快照 |
-| GET | `/api/objectives/{id}/progress` | 确定性状态、failure 分类、恢复预算（不调用模型） |
-| GET | `/api/objectives/{id}/metrics` | 任务/运行/审查/分角色 token/墙钟与累计耗时 |
 | POST | `/api/objectives/{id}/recover` | `{approve:false}` 查看恢复决定；`{approve:true}` 重排队 |
 | POST | `/api/projects/{id}/refresh` | 强制重建项目快照 |
 | POST | `/api/projects/{id}/decisions` | `{text}` 追加项目级决策并刷新 |
 
-未带 token → 401；`--control` 未开启 → 403。
+未带 token → 401；`--control` 未开启 → 403。`--allow-remote` 必须同时启用 `--control`，
+否则拒绝启动；远程模式下 `/api/*` 与 `/files/*` 都需要 token。
 
 ## 4. 多目标 Workspace
 

@@ -35,3 +35,20 @@ func TestTextRejectsHugeInput(t *testing.T) {
 		t.Fatal("oversized input accepted")
 	}
 }
+
+func TestIdenticalInputsShortCircuit(t *testing.T) {
+	if lines, err := Text("same\n", "same\n"); err != nil || lines != nil {
+		t.Fatalf("identical = %+v %v", lines, err)
+	}
+	big := strings.Repeat("x", MaxBytes+1)
+	if lines, err := Text(big, big); err != nil || lines != nil {
+		t.Fatalf("identical oversized = %+v %v", lines, err)
+	}
+}
+
+func TestTrailingNewlineDoesNotExceedLineLimit(t *testing.T) {
+	old := strings.Repeat("a\n", MaxLines)
+	if _, err := Text(old, "a\n"); err != nil {
+		t.Fatalf("a file with exactly the line limit was rejected: %v", err)
+	}
+}

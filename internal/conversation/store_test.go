@@ -357,3 +357,24 @@ func TestAutoApproveSettingRoundTrips(t *testing.T) {
 		t.Fatalf("list = %+v %v", list, err)
 	}
 }
+
+func TestHasEventFindsOneShotSuggestions(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "conversations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	c, err := st.Create("chat", "", "", "/tmp/chat", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seen, err := st.HasEvent(c.ID, "handoff_suggestion"); err != nil || seen {
+		t.Fatalf("empty event log = %v %v", seen, err)
+	}
+	if _, err := st.AppendEvent(c.ID, "handoff_suggestion", map[string]string{"goal": "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if seen, err := st.HasEvent(c.ID, "handoff_suggestion"); err != nil || !seen {
+		t.Fatalf("event not found = %v %v", seen, err)
+	}
+}

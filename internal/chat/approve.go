@@ -115,6 +115,15 @@ Request:
 	if risk != "low" && risk != "high" {
 		risk = "high"
 	}
+	// Network fetches are never auto-approved: a URL can carry private data in
+	// its query string and can reach loopback/link-local services. They always
+	// become a manual approval card, even when the model guessed "low".
+	if strings.EqualFold(strings.TrimSpace(action), "webfetch") {
+		risk = "high"
+		if strings.TrimSpace(parsed.Reason) == "" {
+			return risk, "网络请求需要人工确认", nil
+		}
+	}
 	return risk, clipText(strings.TrimSpace(parsed.Reason), 240), nil
 }
 
@@ -122,6 +131,13 @@ Request:
 // enabled "帮我审批". Low risk is approved once; high risk becomes a normal
 // approval card, including the model's reason.
 func (m *Manager) autoJudgePermission(conversationID, sessionID, requestID, action string, resources []string, message string) {
+	if reason, high := deterministicRisk(action, resources); high {
+		_, _ = m.persist(conversationID, "permission", map[string]any{
+			"requestId": requestID, "action": action, "resources": resources, "message": message,
+			"risk": "high", "reason": reason,
+		})
+		return
+	}
 	ctx, cancel := context.WithTimeout(m.ctx, 90*time.Second)
 	defer cancel()
 	risk, reason, err := m.judgeRisk(ctx, conversationID, action, resources, message)

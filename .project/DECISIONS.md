@@ -541,3 +541,18 @@
   handoff 四张摘要卡内联编辑，移除“编辑细节”区。
 - 验证：审批 dock 渲染/按钮/位置；内联编辑 4 卡且仅 1 个预算字段；头部按钮/连接态；
   `go vet`、24 包测试、desktop/node check。
+
+## 2026-11-21 — K-D072：安全审查 P0 与关键 P1 修复
+- P0：webfetch 不再只读自动放行（且硬规则高风险）；远程读 API/files 需 token，files 加
+  CSP sandbox + no-referrer；token 恒定时间、Origin 必须同 Host+端口、本地 Host 限回环；
+  delivery 跳过符号链接并在 MkdirAll 前校验；verify 拒绝绝对/父目录参数但保留 ./internal/...；
+  opencodeserver 用 Reader 持续排空超长行并监听 done；desktop 异步读管道、加大端口池、
+  停止移出主线程；objective 瞬时裁判错误只记用量不缓存；AO 去掉全局 30s Client timeout；
+  opencodecli 先取结果再估算 OutputTokens。
+- P1：engine 观察错误加锁、Run 在仍有活跃运行时时退避、Collect 失败不中断批次、Claim 槽位
+  计数；负预算钳到 1；replan 只取旧计划任务、比较全部 artifact/validator、拒绝 running；
+  ConfirmGoalDraft 事务化、review 查询按 kind 过滤、objectiveHash 纳入 acceptance；
+  rewind localOnly 清旧 session、远端消息精确/前缀匹配并翻页；evidence 去重键加 kind/content
+  hash、先清低信任内容再算预算、首条安全截断、短技术词保留；审批加确定性高风险规则并复用
+  reconcile 路径；建议去重改 SQL EXISTS；compile/delivery/diff/modelcfg/report 边界修复。
+- 验证：`go test -race -count=1 ./...`、`go vet ./...`、desktop `--check` 全通过。

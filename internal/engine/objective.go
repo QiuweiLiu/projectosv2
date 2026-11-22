@@ -22,13 +22,6 @@ func (e *Engine) JudgeObjective(ctx context.Context, obj goal.Objective, plan go
 	if e.objectiveJudge == nil {
 		return false, nil
 	}
-	used, err := e.store.CountReviews()
-	if err != nil {
-		return false, err
-	}
-	if e.budget.MaxReviews > 0 && used >= e.budget.MaxReviews {
-		return false, fmt.Errorf("objective acceptance needs a review but the review budget is exhausted")
-	}
 	tasks, err := e.store.TasksForPlan(obj.ID, obj.PlanVersion)
 	if err != nil {
 		return false, err
@@ -64,25 +57,41 @@ func (e *Engine) JudgeObjective(ctx context.Context, obj goal.Objective, plan go
 
 	version := objectiveVersion(obj, plan, versions)
 	taskID := domain.TaskID("objective:" + obj.ID)
+	// A cached verdict is valid even after the review budget is spent; check it
+	// before the budget so a completed judgment can always be reused.
 	if blocking, found, err := e.store.ReviewVerdict(taskID, version, domain.ReviewObjective); err != nil {
 		return false, err
 	} else if found {
 		return blocking, nil
+	}
+	used, err := e.store.CountReviews()
+	if err != nil {
+		return false, err
+	}
+	if e.budget.MaxReviews > 0 && used >= e.budget.MaxReviews {
+		return false, fmt.Errorf("objective acceptance needs a review but the review budget is exhausted")
 	}
 
 	outcome, jerr := e.objectiveJudge.JudgeObjective(ctx, ObjectiveReviewRequest{
 		ObjectiveID: obj.ID, Goal: obj.Goal, ExpectedOutcome: obj.ExpectedOutcome,
 		Acceptance: plan.ObjectiveAcceptance, TaskResults: results, TaskSummary: summary,
 	})
-	findings := normalizeFindings(outcome.Findings)
 	if jerr != nil {
-		findings = []domain.Finding{{
-			Severity: domain.SeverityP1, Code: "objective_acceptance_error", Message: jerr.Error(),
-		}}
-		if outcome.PromptChars+outcome.OutputChars+outcome.PromptTokens+outcome.OutputTokens == 0 {
-			return false, fmt.Errorf("objective acceptance failed with unknown usage: %w", jerr)
+		// Transient model/network failures must not become a permanent P1
+		// verdict for this artifact version. Record only the spend, then let
+		// the caller retry the objective acceptance.
+		if outcome.PromptChars+outcome.OutputChars+outcome.PromptTokens+outcome.OutputTokens > 0 {
+			_ = e.store.AddReview(domain.Review{
+				TaskID: taskID, ArtifactVersion: version, Kind: domain.ReviewObjectiveError,
+				PlanVersion: obj.PlanVersion,
+				PromptChars: outcome.PromptChars, OutputChars: outcome.OutputChars,
+				PromptTokens: outcome.PromptTokens, OutputTokens: outcome.OutputTokens,
+				UsageEstimated: outcome.UsageEstimated,
+			})
 		}
+		return false, fmt.Errorf("objective acceptance failed: %w", jerr)
 	}
+	findings := normalizeFindings(outcome.Findings)
 	if err := e.store.AddReview(domain.Review{
 		TaskID:          taskID,
 		ArtifactVersion: version,

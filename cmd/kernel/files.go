@@ -88,5 +88,14 @@ func serveFile(w http.ResponseWriter, r *http.Request, ws *workspace) {
 	}
 	w.Header().Set("Content-Type", ctype)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	// Delivery artifacts are agent-generated and must not run with the kernel's
+	// origin. A sandboxed opaque origin blocks same-origin API/storage access;
+	// the explicit policy keeps self-contained HTML animations working while
+	// blocking network exfiltration.
+	w.Header().Set("Content-Security-Policy",
+		"sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; "+
+			"style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; "+
+			"font-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'")
 	http.ServeContent(w, r, filepath.Base(resolved), info.ModTime(), file)
 }

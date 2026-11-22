@@ -12,6 +12,9 @@ func TestCheckCommandRejectsSmuggling(t *testing.T) {
 		"npm test --if-present",
 		"node -e process.exit(0)",
 		"node ../../etc/passwd.js",
+		"node /tmp/evil.js",
+		"python3 -m unittest /tmp/test.py",
+		"go test ../outside",
 		"go test -exec /bin/sh",
 		"python3 -m unittest -k anything",
 		"python3 -m pytest -p evil",
@@ -26,10 +29,12 @@ func TestCheckCommandRejectsSmuggling(t *testing.T) {
 		"node test.js",
 		"node ./test/check.mjs",
 		"npm test",
+		"npm    test",
 		"npm run test",
 		"python3 -m unittest",
 		"python3 -m unittest discover",
 		"go test ./...",
+		"go test ./internal/...",
 	}
 	for _, cmd := range good {
 		if err := verify.CheckCommand(cmd); err != nil {

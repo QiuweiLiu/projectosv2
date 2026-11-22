@@ -49,10 +49,8 @@ Kernel 仍是 Task/Run/Evidence/Review 唯一权威；没有第二套 Scheduler 
 - **审查预算修复**：同一产物版本重试不再重复调用 reviewer，直接复用已记录结论；审查落库
   失败仅在用量确实未知时才全局停止，已知用量的策略性拒绝只阻塞当前任务。新增
   `TestIdenticalRetryReusesRecordedReviewAndDoesNotPoisonOthers`。
-- **模型选择**：聊天头部“设置”提供 6 角色下拉与思考强度（`#variant`）；空缓存自动刷新；
-  `goal models --refresh` 遵循 `OPENCODE_BIN`，空结果不写缓存；实测 159 项。
-- **思考强度**：`variants` 写入 models.json；reviewer/acceptance 跟随 worker 的回退规则；
-  聊天新会话生效；OpenCode server 已验证接受 variant。
+- **模型选择**：6 角色下拉与思考强度（`#variant` 写入 variants，reviewer/acceptance 跟随
+  worker）；空缓存自动刷新；`goal models --refresh` 遵循 `OPENCODE_BIN`；实测 159 项。
 - **聊天界面**：用户消息右对齐、思考折叠块、Markdown/柔和动效；中断清理审批并提供重新编辑/继续。
 - **聊天审批/预算**：只读自动 once；输入区“帮我审批”开关（低风险模型自动允许，高风险
   弹卡并附原因；失败按高风险）；审批 dock 可堆叠；托管确认异步、计划可重试；预算只填 token；
@@ -62,15 +60,18 @@ Kernel 仍是 Task/Run/Evidence/Review 唯一权威；没有第二套 Scheduler 
 - **桌面对话框**：WKWebView 接入 `WKUIDelegate`；confirm/alert/prompt 不再静默失败。
 - **身份与排版**：Session 注入 ProjectOS instruction；块级 Markdown/表格/浅色代码/
   Claude 风格行距、柔和动效；空闲后无残留思考动画。
-- **驾驶舱状态**：派生执行中/已卡住/待执行；卡住时隐藏开始执行，显示任务级原因与
-  恢复/重规划动作；原始错误与重复小字移除。
+- **驾驶舱状态**：派生执行中/已卡住/待执行；卡住时隐藏开始，显示任务级原因与恢复/重规划。
+- **安全审查 P0/P1**：webfetch 不再自动放行；远程读 API/files 需 token，files 加 CSP
+  sandbox；token 恒定时间 + Host/Origin 同端口；delivery 符号链接、verify 绝对路径、
+  opencode 管道死锁、AO 超时、objective 瞬时错误缓存、rewind localOnly/Sync、evidence
+  去重/预算、replan 跨计划、review kind 过滤等已修；`-race`/vet/desktop check 通过。
 - **托管一致性**：托管前先停止生成并清审批；已托管会话不再显示建议卡，按钮改
   “打开托管目标”；启动时把遗留 running 会话改为 interrupted；审批 404 内联提示。
 - **桌面环境**：外壳自动发现 OpenCode Desktop CLI 并注入 `OPENCODE_BIN`；
   `env -i PATH=/usr/bin:/bin --check-models` 通过（Finder 短 PATH 场景）。
 - **异步标签 + iCloud**：窗口先开，标签各自准备；未下载目录会请求 iCloud 下载并显示状态，
   完成后自动启动；失败可重试。实测 `Documents/测试` 下载完成并启动 8800。
-  `RunKernel` 20s 超时；端口最多 5 个。
+  `RunKernel` 20s 超时；端口池 16 个。
 
 ## Capabilities
 - Objective/Plan/Task/Run 状态机、DAG 并发、SQLite 单写者、事务性结算。
@@ -79,6 +80,7 @@ Kernel 仍是 Task/Run/Evidence/Review 唯一权威；没有第二套 Scheduler 
 - 共享产物 Manifest + seed；Progress/Metrics；WKWebView Cockpit。
 
 ## Remaining
+- P1 剩余：MoveObjective/ConfirmPlan 事务、SSE Subscribe 锁、ctx 取消/进程回收、UTF-8 截断统一。
 - **B/C benchmark 未运行**；Task A 只有 1 个样本，不能据此判断整体收益。
 - 磁盘满、只读挂载、SQLite WAL 损坏、OpenCode Server 退出重连未做现场注入。
 - Recovery 模型辅助诊断仅 fake backend 单元验证；真实模型质量未评估。

@@ -102,3 +102,21 @@ func TestExplanationCacheIsBoundToFindings(t *testing.T) {
 		t.Fatal("stale explanation was returned for different findings")
 	}
 }
+
+func TestFindingsHashIgnoresOrderAndStateHashIncludesError(t *testing.T) {
+	a := []domain.Finding{{Severity: domain.SeverityP1, Code: "a", Message: "first"}}
+	b := []domain.Finding{{Severity: domain.SeverityP1, Code: "z", Message: "second"}}
+	if report.FindingsHash(a) == report.FindingsHash(b) {
+		t.Fatal("different findings have the same hash")
+	}
+	reversed := []domain.Finding{b[0], a[0]}
+	if report.FindingsHash([]domain.Finding{a[0], b[0]}) != report.FindingsHash(reversed) {
+		t.Fatal("finding order changed the hash")
+	}
+	obj := goal.Objective{ID: "obj-1", Status: goal.StatusActive, PlanVersion: 1}
+	one := []domain.Task{{ID: "T1", Status: domain.TaskBlocked, LastError: "review failed"}}
+	two := []domain.Task{{ID: "T1", Status: domain.TaskBlocked, LastError: "blocked"}}
+	if report.StateHash(obj, one) == report.StateHash(obj, two) {
+		t.Fatal("state hash ignored LastError")
+	}
+}

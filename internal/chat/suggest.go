@@ -29,12 +29,8 @@ func (m *Manager) SuggestObjective(ctx context.Context, conversationID, assistan
 	}
 	// One proposal per conversation is enough. Dismissing it does not disable
 	// the explicit "转为托管目标" button, so repeated prompts are pure noise.
-	if events, eerr := m.store.EventsAfter(conversationID, 0, 500); eerr == nil {
-		for _, ev := range events {
-			if ev.Kind == "handoff_suggestion" {
-				return
-			}
-		}
+	if seen, eerr := m.store.HasEvent(conversationID, "handoff_suggestion"); eerr == nil && seen {
+		return
 	}
 	if assistantMessageID != "" {
 		if prev, seen := m.suggested.Load(conversationID); seen && prev == assistantMessageID {

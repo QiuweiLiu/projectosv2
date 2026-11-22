@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -53,7 +54,11 @@ func loadToken(dir string) string {
 }
 
 func (c *controlServer) authorised(r *http.Request) bool {
-	if r.Header.Get("X-Kernel-Token") != c.token {
+	if c.token == "" {
+		return false
+	}
+	token := r.Header.Get("X-Kernel-Token")
+	if subtle.ConstantTimeCompare([]byte(token), []byte(c.token)) != 1 {
 		return false
 	}
 	origin := r.Header.Get("Origin")
@@ -69,11 +74,10 @@ func (c *controlServer) authorised(r *http.Request) bool {
 	default:
 		return false
 	}
-	switch parsed.Hostname() {
-	case "127.0.0.1", "localhost", "::1":
-		return true
-	}
-	return false
+	// CSRF protection: the page must be served from the exact same host and
+	// port. Checking only the hostname allowed another local port (or a
+	// DNS-rebound host) to drive writes with a stolen token.
+	return parsed.Host != "" && strings.EqualFold(parsed.Host, r.Host)
 }
 
 type goalRequest struct {

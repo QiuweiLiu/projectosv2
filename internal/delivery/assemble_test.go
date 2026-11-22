@@ -3,6 +3,7 @@ package delivery_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"projectos/kernel/internal/delivery"
@@ -165,5 +166,81 @@ func TestAssembleRefusesSymlinkTarget(t *testing.T) {
 	}
 	if string(raw) != "safe" {
 		t.Fatalf("outside file was overwritten: %q", raw)
+	}
+}
+
+func TestListSkipsSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "out"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(dir, "secret.txt")
+	if err := os.WriteFile(secret, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(dir, "out", "leak.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "out", "ok.txt"), []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files, err := delivery.List(dir, 10, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Path != "ok.txt" {
+		t.Fatalf("files = %+v", files)
+	}
+}
+
+func TestAssembleRefusesSymlinkedParent(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(dir, "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "out"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "out", "sub")); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(dir, "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.CreateTask(domain.Task{ID: "T1", Validator: "v", ArtifactPath: "sub/a.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := st.Claim("T1", "r1", "fake"); !ok {
+		t.Fatal("claim")
+	}
+	if _, err := st.SettleRun(store.Settlement{RunID: "r1", RunStatus: domain.RunSucceeded, Accepted: true, Result: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := delivery.Assemble(st, dir); err == nil {
+		t.Fatal("assembly wrote through a symlinked parent")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "a.txt")); !os.IsNotExist(err) {
+		t.Fatalf("outside file was created: %v", err)
+	}
+}
+
+func TestListPreviewIsBounded(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "out"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Repeat("x", 10000)
+	if err := os.WriteFile(filepath.Join(dir, "out", "big.txt"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files, err := delivery.List(dir, 10, 100)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("files = %+v %v", files, err)
+	}
+	if len(files[0].Preview) > 100 {
+		t.Fatalf("preview length = %d", len(files[0].Preview))
 	}
 }

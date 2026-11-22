@@ -90,28 +90,39 @@ static int RunKernelTimeout(NSArray<NSString *> *arguments, NSString **output, N
     NSPipe *pipe = [NSPipe pipe];
     task.standardOutput = pipe;
     task.standardError = pipe;
+    dispatch_semaphore_t exitDone = dispatch_semaphore_create(0);
+    task.terminationHandler = ^(NSTask *finished) {
+        dispatch_semaphore_signal(exitDone);
+    };
     @try {
         [task launch];
     } @catch (NSException *exception) {
         if (output) *output = exception.reason ?: @"failed to launch kernel";
         return -1;
     }
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:timeout];
-    while (task.isRunning && [deadline timeIntervalSinceNow] > 0) {
-        [NSThread sleepForTimeInterval:0.1];
-    }
-    if (task.isRunning) {
+    // Drain the pipe while the child runs. Reading only after exit deadlocks
+    // once the child fills the 16-64KB pipe buffer.
+    dispatch_semaphore_t readDone = dispatch_semaphore_create(0);
+    __block NSData *data = nil;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        data = [pipe.fileHandleForReading readDataToEndOfFile];
+        dispatch_semaphore_signal(readDone);
+    });
+    long timedOut = dispatch_semaphore_wait(exitDone,
+        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC)));
+    if (timedOut != 0) {
         [task terminate];
-        NSDate *killDeadline = [NSDate dateWithTimeIntervalSinceNow:1.0];
-        while (task.isRunning && [killDeadline timeIntervalSinceNow] > 0) {
-            [NSThread sleepForTimeInterval:0.05];
+        if (dispatch_semaphore_wait(exitDone,
+                dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC))) != 0) {
+            kill(task.processIdentifier, SIGKILL);
+            [task waitUntilExit];
         }
-        if (task.isRunning) kill(task.processIdentifier, SIGKILL);
+        dispatch_semaphore_wait(readDone, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)));
         if (output) *output = @"kernel command timed out";
         return -2;
     }
-    NSData *data = [pipe.fileHandleForReading readDataToEndOfFile];
-    if (output) *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+    dispatch_semaphore_wait(readDone, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)));
+    if (output) *output = data ? ([[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"") : @"";
     return task.terminationStatus;
 }
 
@@ -186,8 +197,6 @@ static void RequestICloudDownload(NSString *dir) {
 static BOOL PortAvailable(int port) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return NO;
-    int yes = 1;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -211,7 +220,7 @@ static NSString *EnsureServerFor(NSString *dir, BOOL *started) {
         if (existing) return [@"http://" stringByAppendingString:existing];
     }
 
-    for (int port = kDefaultPort; port < kDefaultPort + 5; port++) {
+    for (int port = kDefaultPort; port < kDefaultPort + kMaxTabCount + 8; port++) {
         if (!PortAvailable(port)) continue;
         NSString *addr = [NSString stringWithFormat:@"127.0.0.1:%d", port];
         status = RunKernel(@[@"serve", @"--dir", dir, @"--control", @"--daemon", @"--addr", addr], &output);
@@ -704,6 +713,11 @@ typedef NS_ENUM(NSInteger, TabState) {
         __block BOOL started = NO;
         dispatch_sync(self.startQueue, ^{
             base = EnsureServerFor(path, &started);
+            if (started) {
+                @synchronized(self.serversStarted) {
+                    [self.serversStarted addObject:[path stringByStandardizingPath]];
+                }
+            }
         });
         if (tab.cancelled) {
             if (started) StopServerFor(path);
@@ -720,7 +734,6 @@ typedef NS_ENUM(NSInteger, TabState) {
             }
             tab.baseURL = base;
             tab.startedByApp = started;
-            if (started) [self.serversStarted addObject:[path stringByStandardizingPath]];
             [self attachWebViewForTab:tab];
         });
     });
@@ -812,10 +825,21 @@ typedef NS_ENUM(NSInteger, TabState) {
     for (WorkspaceTab *other in self.tabs) {
         if ([[other.path stringByStandardizingPath] isEqualToString:standard]) stillUsed = YES;
     }
-    if (!stillUsed && [self.serversStarted containsObject:standard]) {
+    BOOL wasStarted = NO;
+    @synchronized(self.serversStarted) {
+        wasStarted = [self.serversStarted containsObject:standard];
+    }
+    if (!stillUsed && wasStarted) {
         if (self.dumpDir) { printf("stop-close %s\n", tab.path.UTF8String); fflush(stdout); }
-        StopServerFor(tab.path);
-        [self.serversStarted removeObject:standard];
+        NSString *pathToStop = [tab.path copy];
+        dispatch_async(self.startQueue, ^{
+            StopServerFor(pathToStop);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                @synchronized(self.serversStarted) {
+                    [self.serversStarted removeObject:standard];
+                }
+            });
+        });
     }
 
     if (!self.tabs.count) {
@@ -1020,11 +1044,23 @@ typedef NS_ENUM(NSInteger, TabState) {
 - (void)applicationWillTerminate:(NSNotification *)notification {
     // Stop only servers this app started; an already-running daemon may serve
     // other clients or keep long-running objectives alive.
-    for (NSString *standard in self.serversStarted) {
-        if (self.dumpDir) { printf("stop-quit %s\n", standard.UTF8String); fflush(stdout); }
-        StopServerFor(standard);
+    NSArray<NSString *> *targets = nil;
+    @synchronized(self.serversStarted) {
+        targets = self.serversStarted.allObjects;
     }
-    [self.serversStarted removeAllObjects];
+    dispatch_group_t group = dispatch_group_create();
+    for (NSString *standard in targets) {
+        if (self.dumpDir) { printf("stop-quit %s\n", standard.UTF8String); fflush(stdout); }
+        dispatch_group_enter(group);
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            StopServerFor(standard);
+            dispatch_group_leave(group);
+        });
+    }
+    dispatch_group_wait(group, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)));
+    @synchronized(self.serversStarted) {
+        [self.serversStarted removeAllObjects];
+    }
 }
 
 @end

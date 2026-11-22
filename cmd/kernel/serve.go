@@ -92,7 +92,7 @@ func cmdServe(args []string) int {
 	addr := fs.String("addr", "127.0.0.1:8787", "listen address")
 	enableControl := fs.Bool("control", false, "enable writes (goal submit, confirm, run, cancel); token protected")
 	background := fs.Bool("daemon", false, "run detached in the background")
-	allowRemote := fs.Bool("allow-remote", false, "bind a non-loopback address (reads are unauthenticated)")
+	allowRemote := fs.Bool("allow-remote", false, "bind a non-loopback address (requires --control; all API/file reads need the token)")
 	stop := fs.Bool("stop", false, "stop the background server")
 	show := fs.Bool("status", false, "print the background server state")
 	if err := fs.Parse(args); err != nil {
@@ -107,7 +107,11 @@ func cmdServe(args []string) int {
 		return exitError
 	}
 	if !*allowRemote && !isLoopbackAddr(*addr) {
-		fmt.Fprintf(os.Stderr, "refusing to bind %q: read APIs have no auth; use 127.0.0.1 or pass --allow-remote\n", *addr)
+		fmt.Fprintf(os.Stderr, "refusing to bind %q: use 127.0.0.1 or pass --allow-remote\n", *addr)
+		return exitError
+	}
+	if *allowRemote && !*enableControl {
+		fmt.Fprintln(os.Stderr, "--allow-remote requires --control so read APIs can require a token")
 		return exitError
 	}
 	switch {
@@ -118,7 +122,7 @@ func cmdServe(args []string) int {
 	case *background:
 		return serveBackground(*dir, *addr, *enableControl, *allowRemote)
 	}
-	return serveForeground(*dir, *addr, *enableControl)
+	return serveForeground(*dir, *addr, *enableControl, *allowRemote)
 }
 
 // liveInstance asks the server who it is. Used by --stop and --status so a
@@ -240,6 +244,42 @@ func serveBackground(dir, addr string, control, allowRemote bool) int {
 	return exitOK
 }
 
+// requireToken is applied when the server is reachable from other machines.
+// HTML pages stay loadable, but every API and delivery file needs the control
+// token. /api/status is the one exception: --stop/--status and startup
+// readiness use it without having the token yet.
+func requireToken(next http.Handler, ctl *controlServer) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if p != "/api/status" && (strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/files/")) {
+			if !ctl.authorised(r) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// requireLoopbackHost blocks DNS-rebinding requests whose Host is not loopback.
+func requireLoopbackHost(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil && ip.IsLoopback() {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if strings.EqualFold(host, "localhost") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		http.Error(w, "forbidden host", http.StatusForbidden)
+	})
+}
+
 func isLoopbackAddr(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -357,7 +397,7 @@ func ensureStateDB(dir string) error {
 	return st.Close()
 }
 
-func serveForeground(dir, addr string, control bool) int {
+func serveForeground(dir, addr string, control, allowRemote bool) int {
 	serveInstance = os.Getenv("KERNEL_SERVE_INSTANCE")
 	// One server per state dir, independent of PID files: the lock dies with the
 	// process, so a stale serve.json cannot block a restart.
@@ -411,8 +451,16 @@ func serveForeground(dir, addr string, control bool) int {
 		return exitError
 	}
 	fmt.Printf("http://%s\n", listener.Addr().String())
+	var handler http.Handler = mux
+	if allowRemote {
+		if ctl != nil {
+			handler = requireToken(handler, ctl)
+		}
+	} else {
+		handler = requireLoopbackHost(handler)
+	}
 	srv := &http.Server{
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      0, // chat uses SSE; per-handler deadlines still apply

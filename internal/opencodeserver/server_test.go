@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -111,5 +113,49 @@ func TestForkSessionKeepsOtherErrors(t *testing.T) {
 	_, err := c.ForkSession(context.Background(), "ses_1", "msg_1")
 	if err == nil || errors.Is(err, ErrForkMessageNotFound) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestScanDrainsHugeLinesWithoutBlocking(t *testing.T) {
+	pr, pw := io.Pipe()
+	s := &Server{}
+	done := make(chan struct{})
+	go func() {
+		s.scan(pr, make(chan string, 1))
+		close(done)
+	}()
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := pw.Write([]byte(strings.Repeat("x", 2<<20) + "\n"))
+		pw.Close()
+		writeDone <- err
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("scan blocked on a >1MB line")
+	}
+	select {
+	case <-writeDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("writer blocked on a stopped scanner")
+	}
+}
+
+func TestStartReturnsWhenChildExitsBeforePassword(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "fake-opencode")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	_, err := Start(context.Background(), Config{Bin: bin, StartupTimeout: 5 * time.Second})
+	if err == nil {
+		t.Fatal("Start succeeded for an immediately exiting child")
+	}
+	if elapsed := time.Since(start); elapsed > 4*time.Second {
+		// The child exits immediately; anything close to StartupTimeout (5s)
+		// means the done channel was not observed. Leave headroom for -race.
+		t.Fatalf("Start waited %v after child exit", elapsed)
 	}
 }

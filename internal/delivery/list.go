@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -26,8 +27,16 @@ func List(dir string, maxFiles, previewBytes int) ([]File, error) {
 	}
 	var files []File
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil || entry.IsDir() {
+		if err != nil {
 			return err
+		}
+		// Never follow links out of the delivery tree: a link to a host file
+		// would otherwise be read by readPreview and exposed through /api/report.
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
 		}
 		if len(files) >= maxFiles {
 			return filepath.SkipAll
@@ -72,11 +81,19 @@ func kindOf(name string) string {
 }
 
 func readPreview(path string, limit int) (string, error) {
-	raw, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
-	if int64(len(raw)) > int64(limit) {
+	defer f.Close()
+	if limit < 0 {
+		limit = 0
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, int64(limit)+1))
+	if err != nil {
+		return "", err
+	}
+	if len(raw) > limit {
 		raw = raw[:limit]
 	}
 	text := string(raw)

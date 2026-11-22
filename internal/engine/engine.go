@@ -36,6 +36,7 @@ type Engine struct {
 	reviewer       Reviewer
 	runTimeout     time.Duration
 	observeErr     map[string]int
+	observeMu      sync.Mutex
 	quarantine     string
 }
 
@@ -111,16 +112,16 @@ func (e *Engine) WithStateDir(dir string) *Engine {
 }
 
 func (e *Engine) WithBudget(b Budget) *Engine {
-	// Negative limits are meaningless; treat them as "unlimited" instead of
-	// letting a typo silently disable the guard.
+	// Negative limits are invalid. Clamp them to the strictest positive guard
+	// instead of turning a typo into "unlimited".
 	if b.MaxRuns < 0 {
-		b.MaxRuns = 0
+		b.MaxRuns = 1
 	}
 	if b.MaxReviews < 0 {
-		b.MaxReviews = 0
+		b.MaxReviews = 1
 	}
 	if b.MaxTokens < 0 {
-		b.MaxTokens = 0
+		b.MaxTokens = 1
 	}
 	e.budget = b
 	return e
@@ -211,12 +212,17 @@ func (e *Engine) Step(ctx context.Context) (StepResult, error) {
 
 		state, err := e.backend.Observe(ctx, run.ExternalID)
 		if err != nil {
+			e.observeMu.Lock()
 			e.observeErr[run.ID]++
-			if e.observeErr[run.ID] < observeErrorBudget {
+			failures := e.observeErr[run.ID]
+			e.observeMu.Unlock()
+			if failures < observeErrorBudget {
 				e.record(run.TaskID, "observe_retry", err.Error())
 				continue
 			}
+			e.observeMu.Lock()
 			delete(e.observeErr, run.ID)
+			e.observeMu.Unlock()
 			out.Rejected = append(out.Rejected, run.TaskID)
 			out.Blocked = e.appendBlocked(out.Blocked, run.TaskID, "observe error")
 			if _, serr := e.settle(run, task, exec.Artifact{}, domain.RunUnknown, false, false, "observe error"); serr != nil {
@@ -225,7 +231,9 @@ func (e *Engine) Step(ctx context.Context) (StepResult, error) {
 			e.record(run.TaskID, "run_unknown", err.Error())
 			continue
 		}
+		e.observeMu.Lock()
 		delete(e.observeErr, run.ID)
+		e.observeMu.Unlock()
 		if state.Status == domain.RunRunning {
 			continue
 		}
@@ -251,7 +259,8 @@ func (e *Engine) Step(ctx context.Context) (StepResult, error) {
 					e.record(id, "blocked", "usage unknown")
 					out.Blocked = append(out.Blocked, id)
 				}
-				return out, nil
+				// Other active runs still need to be settled; do not abort the
+				// whole batch because one collect returned no usage.
 			}
 			continue
 		}
@@ -331,13 +340,24 @@ func (e *Engine) Step(ctx context.Context) (StepResult, error) {
 	if err != nil {
 		return out, err
 	}
-	for i := 0; i < len(ready) && i < free; i++ {
+	dispatched := 0
+	for _, task := range ready {
+		if dispatched >= free {
+			break
+		}
 		if reason, err := e.budgetStop(); err != nil {
 			return out, err
 		} else if reason != "" {
+			blocked, berr := e.store.BlockPending(reason)
+			if berr != nil {
+				return out, berr
+			}
+			for _, id := range blocked {
+				e.record(id, "blocked", reason)
+				out.Blocked = append(out.Blocked, id)
+			}
 			break
 		}
-		task := ready[i]
 		runID := fmt.Sprintf("%s-run-%d-%d", task.ID, task.Attempts+1, time.Now().UnixNano())
 		run, ok, err := e.store.Claim(task.ID, runID, e.backend.Name())
 		if err != nil {
@@ -346,6 +366,7 @@ func (e *Engine) Step(ctx context.Context) (StepResult, error) {
 		if !ok {
 			continue // another controller claimed it first
 		}
+		dispatched++
 		prompt, perr := e.expandPrompt(task)
 		if perr != nil {
 			_, _ = e.settle(run, task, exec.Artifact{}, domain.RunFailed, false, false, "prompt: "+perr.Error())
@@ -625,7 +646,16 @@ func (e *Engine) judge(ctx context.Context, run domain.Run, task domain.Task, ar
 	if err != nil {
 		return "", false, err
 	}
-	if !found || !blocking {
+	if !found {
+		next, serr := e.settle(run, task, artifact, domain.RunSucceeded, false, true,
+			"acceptance: verdict missing")
+		if serr != nil {
+			return "", false, serr
+		}
+		e.record(run.TaskID, "acceptance_blocked", "missing verdict on "+version)
+		return next, true, nil
+	}
+	if !blocking {
 		return "", false, nil
 	}
 	next, serr := e.settle(run, task, artifact, domain.RunSucceeded, false, true, "acceptance: task not fulfilled")
@@ -1217,6 +1247,16 @@ func (e *Engine) Run(ctx context.Context, maxSteps int) (int, error) {
 		}
 		if done {
 			return i + 1, nil
+		}
+		// Step observes running work; sleeping here stops a tight spin that
+		// exhausts maxSteps before a real run has a chance to finish.
+		active, aerr := e.store.ActiveRuns()
+		if aerr == nil && len(active) > 0 {
+			select {
+			case <-ctx.Done():
+				return i, ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+			}
 		}
 	}
 	return maxSteps, fmt.Errorf("engine did not converge within %d steps", maxSteps)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -51,7 +52,8 @@ func CheckCommand(cmd string) error {
 	fields := strings.Fields(cmd)
 	switch fields[0] {
 	case "npm":
-		if cmd == "npm test" || cmd == "npm run test" {
+		if (len(fields) == 2 && fields[1] == "test") ||
+			(len(fields) == 3 && fields[1] == "run" && fields[2] == "test") {
 			return nil
 		}
 	case "python3":
@@ -88,12 +90,20 @@ func isPlainArg(arg string) bool {
 	if arg == "" {
 		return false
 	}
-	// "./..." is Go's package pattern, not a parent-directory escape.
-	if arg == "./..." || arg == "..." {
-		return true
-	}
-	if strings.Contains(arg, "..") {
+	// Absolute paths and home-relative paths can escape the task workspace.
+	if filepath.IsAbs(arg) || strings.HasPrefix(arg, "/") || strings.HasPrefix(arg, "~") {
 		return false
+	}
+	// Reject parent traversal by segment, not by substring: "./internal/..."
+	// is a legal Go package pattern, while "../outside" and "a/../b" are not.
+	parts := strings.Split(arg, "/")
+	for i, part := range parts {
+		if part == ".." {
+			return false
+		}
+		if part == "..." && i != len(parts)-1 {
+			return false
+		}
 	}
 	for _, r := range arg {
 		switch {

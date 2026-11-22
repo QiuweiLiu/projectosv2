@@ -30,11 +30,15 @@ func Tasks(p goal.Plan, objectiveID string, version int) []domain.Task {
 				commands = append(commands, spec)
 			}
 		}
+		artifact := ""
+		if len(t.Artifacts) > 0 {
+			artifact = t.Artifacts[0]
+		}
 		tasks = append(tasks, domain.Task{
 			ID:           domain.TaskID(t.ID),
 			Objective:    t.Goal,
 			Prompt:       prompt(t),
-			ArtifactPath: t.Artifacts[0],
+			ArtifactPath: artifact,
 			Validator:    t.ID,
 			Deps:         deps,
 			MaxAttempts:  maxAttempts,
@@ -82,7 +86,11 @@ func prompt(t goal.PlanTask) string {
 	if len(t.Inputs) > 0 {
 		b.WriteString("\nInputs: " + strings.Join(t.Inputs, ", "))
 	}
-	b.WriteString("\nRequired artifact: write " + t.Artifacts[0] + " in the current working directory.")
+	artifact := ""
+	if len(t.Artifacts) > 0 {
+		artifact = t.Artifacts[0]
+	}
+	b.WriteString("\nRequired artifact: write " + artifact + " in the current working directory.")
 	if len(t.Acceptance) > 0 {
 		b.WriteString("\nAcceptance criteria: " + strings.Join(t.Acceptance, "; "))
 	}

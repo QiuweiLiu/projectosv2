@@ -529,6 +529,17 @@ func (s *Store) MatchLegacyMessage(conversationID, role, text string) (string, b
 	return ids[0], true, nil
 }
 
+// HasEvent reports whether a conversation already produced an event of this
+// kind. Used for one-shot suggestions without paging the whole log.
+func (s *Store) HasEvent(conversationID, kind string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var exists int
+	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM events WHERE conversation_id=? AND kind=? LIMIT 1)`,
+		conversationID, kind).Scan(&exists)
+	return exists == 1, err
+}
+
 func (s *Store) HasPermissionEvent(conversationID, requestID string) (bool, error) {
 	if requestID == "" {
 		return false, nil
@@ -537,7 +548,7 @@ func (s *Store) HasPermissionEvent(conversationID, requestID string) (bool, erro
 	defer s.mu.Unlock()
 	var n int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM events
-		WHERE conversation_id=? AND kind='permission' AND data LIKE ?`,
+		WHERE conversation_id=? AND kind IN ('permission','permission_judging','permission_auto') AND data LIKE ?`,
 		conversationID, "%"+requestID+"%").Scan(&n)
 	return n > 0, err
 }
@@ -686,14 +697,31 @@ func (s *Store) Rewind(conversationID, messageID string) (Message, []Message, er
 		}
 	}
 	evRows.Close()
-	if cutoff > 0 {
-		if _, err := tx.Exec(`DELETE FROM events WHERE conversation_id=? AND seq>=?`, conversationID, cutoff); err != nil {
+	if cutoff == 0 {
+		// The user event may have been pruned. Cut by the target message's
+		// timestamp instead of deleting the entire event log (which would erase
+		// unrelated history).
+		var first sql.NullInt64
+		if err := tx.QueryRow(`SELECT MIN(seq) FROM events WHERE conversation_id=? AND at>=?`,
+			conversationID, target.CreatedAt.Format(time.RFC3339Nano)).Scan(&first); err != nil {
 			return Message{}, nil, err
 		}
-	} else {
-		if _, err := tx.Exec(`DELETE FROM events WHERE conversation_id=?`, conversationID); err != nil {
-			return Message{}, nil, err
+		if first.Valid {
+			cutoff = first.Int64
+		} else {
+			var maxSeq sql.NullInt64
+			if err := tx.QueryRow(`SELECT MAX(seq) FROM events WHERE conversation_id=?`, conversationID).Scan(&maxSeq); err != nil {
+				return Message{}, nil, err
+			}
+			if maxSeq.Valid {
+				cutoff = maxSeq.Int64 + 1 // no events belong to the removed turn
+			} else {
+				cutoff = 1 // empty log; nothing to delete
+			}
 		}
+	}
+	if _, err := tx.Exec(`DELETE FROM events WHERE conversation_id=? AND seq>=?`, conversationID, cutoff); err != nil {
+		return Message{}, nil, err
 	}
 	if _, err := tx.Exec(`DELETE FROM messages WHERE conversation_id=? AND rowid>=?`, conversationID, rowID); err != nil {
 		return Message{}, nil, err
@@ -841,7 +869,12 @@ func (s *Store) UpdateGoalDraft(d GoalDraft) error {
 func (s *Store) ConfirmGoalDraft(id, objectiveID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	res, err := s.db.Exec(`UPDATE goal_drafts SET status='confirmed', updated_at=? WHERE id=? AND status='draft'`,
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE goal_drafts SET status='confirmed', updated_at=? WHERE id=? AND status='draft'`,
 		now(), id)
 	if err != nil {
 		return err
@@ -849,9 +882,11 @@ func (s *Store) ConfirmGoalDraft(id, objectiveID string) error {
 	if n, _ := res.RowsAffected(); n != 1 {
 		return fmt.Errorf("goal draft is not editable")
 	}
-	_, err = s.db.Exec(`UPDATE conversations SET objective_id=?, updated_at=? WHERE id=
-		(SELECT conversation_id FROM goal_drafts WHERE id=?)`, objectiveID, now(), id)
-	return err
+	if _, err := tx.Exec(`UPDATE conversations SET objective_id=?, updated_at=? WHERE id=
+		(SELECT conversation_id FROM goal_drafts WHERE id=?)`, objectiveID, now(), id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) SetObjective(conversationID, objectiveID string) error {

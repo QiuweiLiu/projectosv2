@@ -40,7 +40,11 @@ func matchServerUserMessage(msgs []opencodeserver.Message, target conversation.M
 			continue
 		}
 		serverText := strings.TrimSpace(msg.Text)
-		if serverText != text && !strings.Contains(serverText, text) {
+		// Exact, or the exact user text after the injected project context.
+		// Arbitrary substring matching made a short message ("ok", "你好")
+		// collide with a long context block.
+		if serverText != text &&
+			!(strings.HasPrefix(serverText, "Project context") && strings.HasSuffix(serverText, "\n\n"+text)) {
 			continue
 		}
 		if target.CreatedAt.IsZero() {
@@ -55,6 +59,23 @@ func matchServerUserMessage(msgs []opencodeserver.Message, target conversation.M
 		}
 	}
 	return best
+}
+
+func listServerMessages(ctx context.Context, srv *opencodeserver.Server, sessionID string) []opencodeserver.Message {
+	var out []opencodeserver.Message
+	cursor := ""
+	for page := 0; page < 10; page++ {
+		result, err := srv.MessagesPage(ctx, sessionID, 200, cursor, "asc")
+		if err != nil {
+			return nil
+		}
+		out = append(out, result.Data...)
+		if result.Cursor.Next == "" || len(result.Data) == 0 || len(out) >= 2000 {
+			break
+		}
+		cursor = result.Cursor.Next
+	}
+	return out
 }
 
 // Rewind forks the OpenCode session before the selected user message, then
@@ -112,8 +133,8 @@ func (m *Manager) Rewind(ctx context.Context, conversationID, messageID string, 
 			// The stored remote id can be a local id from an older build, or the
 			// server may have regenerated it. Resolve the real message by text
 			// and time before falling back to a local-only rewind.
-			if page, perr := srv.MessagesPage(ctx, sessionID, 200, "", "asc"); perr == nil {
-				if actual := matchServerUserMessage(page.Data, target); actual != "" && actual != before {
+			if msgs := listServerMessages(ctx, srv, sessionID); len(msgs) > 0 {
+				if actual := matchServerUserMessage(msgs, target); actual != "" && actual != before {
 					forked, ferr = srv.ForkSession(ctx, sessionID, actual)
 				}
 			}
@@ -141,6 +162,15 @@ func (m *Manager) Rewind(ctx context.Context, conversationID, messageID string, 
 		m.mu.Lock()
 		delete(m.sessions, c.SessionID)
 		m.sessions[sessionID] = conversationID
+		m.mu.Unlock()
+	} else if strings.TrimSpace(target.RemoteID) != "" {
+		// A local-only rewind of a message that once had a remote id must not
+		// let Sync pull the deleted turn back from the old session.
+		if err := m.store.SetSession(conversationID, ""); err != nil {
+			return RewindResult{}, err
+		}
+		m.mu.Lock()
+		delete(m.sessions, c.SessionID)
 		m.mu.Unlock()
 	}
 	_ = m.store.SetStatus(conversationID, conversation.StatusIdle, "")

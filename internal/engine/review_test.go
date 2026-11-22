@@ -501,7 +501,12 @@ func TestAcceptanceRespectsReviewBudget(t *testing.T) {
 func TestAcceptanceBlockSurvivesTargetedReReview(t *testing.T) {
 	fake := exec.NewFake(1)
 	fake.Output["A"] = "same"
-	reviewer := &scriptedReviewer{responses: [][]domain.Finding{nil, nil}}
+	// The first review must block so attempt 2 is a targeted re-review. An
+	// acceptance finding must not be what selects the review kind.
+	reviewer := &scriptedReviewer{responses: [][]domain.Finding{
+		{{Severity: domain.SeverityP1, Code: "bug", Message: "review defect"}},
+		nil,
+	}}
 	judge := &scriptedReviewer{responses: [][]domain.Finding{
 		{{Severity: domain.SeverityP1, Code: "missing_rows", Message: "only one row"}},
 		{{Severity: domain.SeverityP1, Code: "missing_rows", Message: "only one row"}},

@@ -19,6 +19,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"projectos/kernel/internal/domain"
 	"projectos/kernel/internal/exec"
@@ -181,8 +182,6 @@ func (b *Backend) Collect(ctx context.Context, externalID, artifactPath string) 
 		artifact.PromptTokens = u.input
 		artifact.OutputTokens = u.output
 		artifact.UsageEstimated = false
-	} else if artifact.Result != "" {
-		artifact.OutputTokens = len(artifact.Result) / 4
 	}
 	if strings.TrimSpace(artifactPath) != "" {
 		content, err := os.ReadFile(filepath.Join(r.dir, filepath.FromSlash(artifactPath)))
@@ -192,6 +191,13 @@ func (b *Backend) Collect(ctx context.Context, externalID, artifactPath string) 
 		artifact.Result = string(content)
 	} else {
 		artifact.Result = text
+	}
+	if artifact.OutputTokens == 0 && strings.TrimSpace(artifact.Result) != "" {
+		artifact.OutputTokens = utf8.RuneCountInString(artifact.Result) / 4
+		if artifact.OutputChars == 0 {
+			artifact.OutputChars = len(artifact.Result)
+		}
+		artifact.UsageEstimated = true
 	}
 	artifact.Version = digest(artifact.Result)
 	return artifact, nil

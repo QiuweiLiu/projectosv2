@@ -5,8 +5,8 @@
 ## 信任模型
 
 - 单机、单用户。Kernel 以启动它的那个用户身份运行。
-- 计划由模型提出，**必须由人确认**才会执行；`createGoal` 的自动执行只是把
-  plan → confirm → run 串起来，不是取消确认。
+- 计划由模型提出，**必须由人确认**才会执行；`POST /api/goals` 的 `runNow` 只生成计划，
+  不会确认或执行；确认与运行必须分别调用 confirm / run。
 - 目标文本和计划字段都来自模型输出，按不可信输入处理：路径校验、允许列表、
   上限、DAG 校验都在 Kernel 侧做，不依赖模型自觉。
 
@@ -29,10 +29,14 @@
 
 ## HTTP 表面
 
-- 读接口（`/api/objectives`、`/api/events`、`/api/tasks/{id}`、`/files/`）**没有认证**。
-  因此默认只允许绑定回环地址；`--allow-remote` 等于把项目内容暴露到网络，需自行承担。
-- 写接口（创建/计划/确认/执行/取消）需要 `X-Kernel-Token`，并校验 Origin 的
-  scheme + host（精确匹配，不用前缀）。
+- 读接口（`/api/objectives`、`/api/events`、`/api/tasks/{id}`、`/files/`）默认只绑定
+  回环地址；`--allow-remote` 必须同时启用 `--control`，此后除 `/api/status` 外所有
+  `/api/*` 与 `/files/*` 都要求 `X-Kernel-Token`。
+- 写接口（创建/计划/确认/执行/取消）需要 `X-Kernel-Token`；token 用
+  `crypto/subtle.ConstantTimeCompare` 比对。Origin 必须与请求的 `Host`（含端口）完全一致；
+  非回环 `Host` 在本地模式下直接拒绝，避免 DNS rebinding。
+- `/files/` 的交付物响应带 `Content-Security-Policy: sandbox ...; connect-src 'none'`，
+  防止 Agent 生成的 HTML/SVG 以 Kernel 同源执行脚本或回读 API。
 - token 存在 `<state>/control-token`（0600）；`serve.log` 也是 0600，且 daemon 模式
   不再把 token 打进日志。
 - 界面支持 `#token=...` 方便本地打开演示链接：fragment 不会发给服务器，读入后写入
@@ -80,5 +84,5 @@
 - 聊天默认工作目录是 `<workspace>/chats/<conversation>`；关联 Objective 时使用项目目录，
   因此写文件和命令仍然需要逐次批准。
 - 这不是 OS 级沙箱；批准后的命令以当前用户身份执行。
-- Kernel 的只读 API（目标、事件、diff、out 文件）仍默认无 token，但 `serve` 默认只绑定
-  回环地址；`--allow-remote` 会扩大暴露面，必须显式开启。
+- Kernel 的只读 API 本地默认无 token，但 `serve` 默认只绑定回环地址；`--allow-remote`
+  会扩大暴露面，必须同时启用 `--control` 并由调用方携带 token。

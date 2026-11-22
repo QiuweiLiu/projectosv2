@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"projectos/kernel/internal/domain"
@@ -15,13 +16,29 @@ import (
 // FindingsHash identifies one exact set of review findings. A cached Chinese
 // explanation is only valid for the findings it was written from.
 func FindingsHash(findings []domain.Finding) string {
-	raw, _ := json.Marshal(findings)
+	sorted := make([]domain.Finding, len(findings))
+	copy(sorted, findings)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Severity != sorted[j].Severity {
+			return sorted[i].Severity < sorted[j].Severity
+		}
+		if sorted[i].Code != sorted[j].Code {
+			return sorted[i].Code < sorted[j].Code
+		}
+		return sorted[i].Message < sorted[j].Message
+	})
+	raw, _ := json.Marshal(sorted)
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:8])
 }
 
 func ExplanationPath(dir string, taskID domain.TaskID) string {
-	return filepath.Join(dir, "explain", string(taskID)+".md")
+	// Task ids are normally T1/T2, but never let a malformed id escape explain/.
+	safe := strings.NewReplacer("/", "_", "\\", "_", "..", "_").Replace(string(taskID))
+	if safe == "" {
+		safe = "unknown"
+	}
+	return filepath.Join(dir, "explain", safe+".md")
 }
 
 // ExplainPrompt asks the reporter to translate findings, not to judge them.

@@ -713,6 +713,7 @@ var (
 func (s *Store) LastBlockingFindings(taskID domain.TaskID) ([]domain.Finding, error) {
 	var raw string
 	err := s.db.QueryRow(`SELECT findings FROM reviews WHERE task_id=? AND blocking=1
+		AND kind IN ('full','targeted')
 		ORDER BY at DESC LIMIT 1`, string(taskID)).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -737,7 +738,7 @@ func (s *Store) LastBlockingFindings(taskID domain.TaskID) ([]domain.Finding, er
 // blocking or not, so a retry can be told what to fix and what to improve.
 func (s *Store) LastReviewFindings(taskID domain.TaskID) ([]domain.Finding, error) {
 	var raw string
-	err := s.db.QueryRow(`SELECT findings FROM reviews WHERE task_id=? AND blocking=1
+	err := s.db.QueryRow(`SELECT findings FROM reviews WHERE task_id=? AND kind='full'
 		ORDER BY at DESC LIMIT 1`, string(taskID)).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -769,6 +770,7 @@ func (s *Store) LastBlockingCodes(taskID domain.TaskID) ([]string, error) {
 func (s *Store) blockingCodes(taskID domain.TaskID) (map[string]bool, error) {
 	var raw string
 	err := s.db.QueryRow(`SELECT findings FROM reviews WHERE task_id=? AND blocking=1
+		AND kind IN ('full','targeted')
 		ORDER BY at DESC LIMIT 1`, string(taskID)).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return map[string]bool{}, nil
@@ -838,6 +840,9 @@ func (s *Store) AddReview(rev domain.Review) error {
 		if acceptance > 0 {
 			return ErrReviewLimit
 		}
+	case domain.ReviewObjectiveError:
+		// Usage-only record; it must not satisfy or exhaust the per-version
+		// objective verdict budget.
 	case domain.ReviewObjective:
 		var objective int
 		if err := s.db.QueryRow(`SELECT COUNT(*) FROM reviews
@@ -911,7 +916,7 @@ func (s *Store) AcceptanceVerdict(taskID domain.TaskID, artifactVersion string) 
 func (s *Store) HasBlockingReview(taskID domain.TaskID, artifactVersion string) (bool, error) {
 	var blocking int
 	err := s.db.QueryRow(`SELECT blocking FROM reviews
-		WHERE task_id=? AND artifact_version=?
+		WHERE task_id=? AND artifact_version=? AND kind IN ('full','targeted')
 		ORDER BY at DESC, rowid DESC LIMIT 1`, string(taskID), artifactVersion).Scan(&blocking)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil

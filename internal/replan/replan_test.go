@@ -3,6 +3,7 @@ package replan_test
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"projectos/kernel/internal/domain"
@@ -152,5 +153,57 @@ func TestNormalizeAcceptedRestoresDroppedAcceptedTasks(t *testing.T) {
 	}
 	if out.Tasks[2].ID != "T2" {
 		t.Fatalf("dropped accepted task was not restored: %+v", out.Tasks)
+	}
+}
+
+func TestFailureContextOnlyUsesTasksFromTheOldPlan(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "k.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.CreateTask(domain.Task{ID: "T1", Validator: "v", ArtifactPath: "a.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateTask(domain.Task{ID: "T9", Validator: "v", ArtifactPath: "z.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := st.Claim("T1", "r1", "fake"); !ok {
+		t.Fatal("claim T1")
+	}
+	if _, err := st.SettleRun(store.Settlement{RunID: "r1", RunStatus: domain.RunSucceeded,
+		Note: "review: blocking finding"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := st.Claim("T9", "r9", "fake"); !ok {
+		t.Fatal("claim T9")
+	}
+	if _, err := st.SettleRun(store.Settlement{RunID: "r9", RunStatus: domain.RunSucceeded,
+		Note: "old-plan failure"}); err != nil {
+		t.Fatal(err)
+	}
+	feedback, failed, _, err := replan.FailureContext(st, plan("T1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 1 || failed[0] != "T1" {
+		t.Fatalf("failed = %v", failed)
+	}
+	if strings.Contains(feedback, "T9") || strings.Contains(feedback, "old-plan failure") {
+		t.Fatalf("feedback leaked another plan: %s", feedback)
+	}
+}
+
+func TestValidateReplacementIgnoresValidatorAndDepOrder(t *testing.T) {
+	old := plan("T1")
+	old.Tasks[0].Validators = []verify.Spec{
+		{Type: "nonempty"}, {Type: "contains", Expect: "ok"},
+	}
+	next := plan("T1")
+	next.Tasks[0].Validators = []verify.Spec{
+		{Type: "contains", Expect: "ok"}, {Type: "nonempty"},
+	}
+	if err := replan.ValidateReplacement(old, next, []string{"T1"}); err != nil {
+		t.Fatalf("reordered validators rejected: %v", err)
 	}
 }

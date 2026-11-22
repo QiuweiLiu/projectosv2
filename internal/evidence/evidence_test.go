@@ -129,3 +129,26 @@ func TestRenderDoesNotMistakeCompletedObjectiveForArtifact(t *testing.T) {
 		t.Fatalf("objective was rendered as an empty artifact:\n%s", text)
 	}
 }
+
+func TestSelectKeepsEveryUserDecision(t *testing.T) {
+	idx := Index{ProjectID: "p1", Entries: []Entry{
+		{ProjectID: "p1", ObjectiveID: "obj", Kind: KindDecision, Trust: TrustUserConfirmed,
+			Title: "use baseline A", Content: "use baseline A", UpdatedAt: time.Now().UTC()},
+		{ProjectID: "p1", ObjectiveID: "obj", Kind: KindDecision, Trust: TrustUserConfirmed,
+			Title: "use baseline B", Content: "use baseline B", UpdatedAt: time.Now().UTC()},
+	}}
+	b := Select(idx, "baseline", 4096)
+	if len(b.Entries) != 2 {
+		t.Fatalf("decisions deduplicated: %+v", b.Entries)
+	}
+}
+
+func TestQueryTokensKeepShortTechnicalWords(t *testing.T) {
+	tokens := queryTokens("P0 go ao")
+	joined := strings.Join(tokens, ",")
+	for _, want := range []string{"p0", "go", "ao"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("token %q missing from %v", want, tokens)
+		}
+	}
+}

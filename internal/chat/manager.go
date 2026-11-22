@@ -567,34 +567,7 @@ func (m *Manager) handle(ev opencodeserver.Event) {
 	case "session.tool.failed":
 		_, _ = m.persist(convID, "tool_result", map[string]any{"id": base.ID, "status": "failed", "message": base.Text})
 	case "permission.asked":
-		// Read-only access is part of normal chat; do not make the operator
-		// approve every file read. Writes, commands and questions still ask.
-		if autoApproveReadOnly(base.Action) {
-			if srv := m.currentServer(); srv != nil && base.SessionID != "" {
-				ctx, cancel := context.WithTimeout(m.ctx, 10*time.Second)
-				err := srv.ReplyPermission(ctx, base.SessionID, base.ID, "once", "")
-				cancel()
-				if err == nil {
-					_, _ = m.persist(convID, "permission_auto", map[string]any{
-						"requestId": base.ID, "action": base.Action, "resources": base.Resources,
-						"source": "readonly",
-					})
-					return
-				}
-			}
-		}
-		if !strings.EqualFold(strings.TrimSpace(base.Action), "question") {
-			if c, ok, _ := m.store.Get(convID); ok && c.AutoApprove {
-				_, _ = m.persist(convID, "permission_judging", map[string]any{
-					"requestId": base.ID, "action": base.Action, "resources": base.Resources,
-				})
-				go m.autoJudgePermission(convID, base.SessionID, base.ID, base.Action, base.Resources, base.Message)
-				return
-			}
-		}
-		_, _ = m.persist(convID, "permission", map[string]any{
-			"requestId": base.ID, "action": base.Action, "resources": base.Resources, "message": base.Message,
-		})
+		m.handlePermission(convID, base.SessionID, base.ID, base.Action, base.Resources, base.Message)
 	case "permission.replied":
 		_, _ = m.persist(convID, "permission_replied", map[string]string{"requestId": base.ID})
 	case "session.execution.started":
@@ -611,9 +584,66 @@ func (m *Manager) handle(ev opencodeserver.Event) {
 	}
 }
 
+func (m *Manager) handlePermission(convID, sessionID, requestID, action string, resources []string, message string) {
+	// Read-only access is part of normal chat; do not make the operator approve
+	// every file read.
+	if autoApproveReadOnly(action) {
+		if srv := m.currentServer(); srv != nil && sessionID != "" {
+			ctx, cancel := context.WithTimeout(m.ctx, 10*time.Second)
+			err := srv.ReplyPermission(ctx, sessionID, requestID, "once", "")
+			cancel()
+			if err == nil {
+				_, _ = m.persist(convID, "permission_auto", map[string]any{
+					"requestId": requestID, "action": action, "resources": resources,
+					"source": "readonly",
+				})
+				return
+			}
+		}
+	}
+	if !strings.EqualFold(strings.TrimSpace(action), "question") {
+		if c, ok, _ := m.store.Get(convID); ok && c.AutoApprove {
+			_, _ = m.persist(convID, "permission_judging", map[string]any{
+				"requestId": requestID, "action": action, "resources": resources,
+			})
+			go m.autoJudgePermission(convID, sessionID, requestID, action, resources, message)
+			return
+		}
+	}
+	_, _ = m.persist(convID, "permission", map[string]any{
+		"requestId": requestID, "action": action, "resources": resources, "message": message,
+	})
+}
+
+// deterministicRisk rejects obvious dangerous requests without asking a model.
+// This is the hard layer that prompt injection in the request cannot talk past.
+func deterministicRisk(action string, resources []string) (string, bool) {
+	if strings.EqualFold(strings.TrimSpace(action), "webfetch") {
+		return "网络请求需要人工确认", true
+	}
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "bash", "shell":
+		cmd := strings.ToLower(strings.Join(resources, " "))
+		for _, bad := range []string{"rm -rf", "git reset --hard", "git push --force", "git push -f",
+			"sudo ", "chmod 777", "mkfs", "dd if=", "> /dev/", "shutdown", "reboot"} {
+			if strings.Contains(cmd, bad) {
+				return "命令包含高风险操作，需要人工确认", true
+			}
+		}
+	case "edit", "write":
+		for _, resource := range resources {
+			clean := filepath.Clean(resource)
+			if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+				return "写入路径在工作区之外，需要人工确认", true
+			}
+		}
+	}
+	return "", false
+}
+
 func autoApproveReadOnly(action string) bool {
 	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "read", "list", "glob", "grep", "webfetch":
+	case "read", "list", "glob", "grep":
 		return true
 	default:
 		return false
@@ -761,9 +791,7 @@ func (m *Manager) reconcilePermissions() {
 		if err != nil || seen {
 			continue
 		}
-		_, _ = m.persist(conversationID, "permission", map[string]any{
-			"requestId": req.ID, "action": req.Action, "resources": req.Resources, "message": req.Message,
-		})
+		m.handlePermission(conversationID, req.SessionID, req.ID, req.Action, req.Resources, req.Message)
 	}
 }
 

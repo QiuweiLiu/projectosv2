@@ -105,9 +105,12 @@ func (s Settings) SetVariant(role, variant string) (Settings, error) {
 	default:
 		return s, fmt.Errorf("unknown role %q (want %s)", role, strings.Join(Roles, "|"))
 	}
-	if s.Variants == nil {
-		s.Variants = map[string]string{}
+	// Copy the map: a value receiver must not mutate a caller's shared map.
+	next := make(map[string]string, len(s.Variants)+1)
+	for k, v := range s.Variants {
+		next[k] = v
 	}
+	s.Variants = next
 	if variant == "" {
 		delete(s.Variants, role)
 	} else {
@@ -154,11 +157,22 @@ func Save(dir string, s Settings) error {
 	if err != nil {
 		return err
 	}
-	tmp := settingsPath(dir) + ".tmp"
-	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
+	target := settingsPath(dir)
+	tmp, err := os.CreateTemp(filepath.Dir(target), ".models-*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, settingsPath(dir))
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(append(raw, '\n')); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	_ = os.Chmod(tmpPath, 0o644)
+	return os.Rename(tmpPath, target)
 }
 
 func LoadCache(dir string) Cache {
@@ -229,7 +243,11 @@ func Refresh(ctx context.Context, dir, bin string) ([]string, error) {
 			}
 		}
 		if attempt < 2 {
-			time.Sleep(time.Duration(700*(attempt+1)) * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(700*(attempt+1)) * time.Millisecond):
+			}
 		}
 	}
 	if len(models) == 0 {

@@ -16,6 +16,8 @@ import (
 )
 
 type Policy struct {
+	// MaxRecoveries bounds automatic recovery actions. 0 explicitly disables
+	// recovery; this differs from Engine.Budget where 0 means unlimited.
 	MaxRecoveries int
 	AttemptCap    int
 	ReplansLeft   int
@@ -105,6 +107,10 @@ func DecideWithSuggestion(st *store.Store, obj goal.Objective, needsApproval boo
 		d.Reason = "recovery budget exhausted"
 		return d, nil
 	}
+	if report.Failure.Category == "dependency_failure" && policy.ReplansLeft > 0 {
+		d.Action = "replan"
+		return d, nil
+	}
 	if report.Failure.Recoverable {
 		task, ok, err := st.Get(domain.TaskID(report.Failure.TaskID))
 		if err != nil {
@@ -121,10 +127,6 @@ func DecideWithSuggestion(st *store.Store, obj goal.Objective, needsApproval boo
 			return d, nil
 		}
 		d.Action = "retry"
-		return d, nil
-	}
-	if report.Failure.Category == "dependency_failure" && policy.ReplansLeft > 0 {
-		d.Action = "replan"
 		return d, nil
 	}
 	d.Action = "stop"

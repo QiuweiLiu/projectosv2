@@ -24,6 +24,9 @@ const (
 	ReviewTargeted   ReviewKind = "targeted"
 	ReviewAcceptance ReviewKind = "acceptance"
 	ReviewObjective  ReviewKind = "objective"
+	// ReviewObjectiveError records usage for a transient objective-judge failure
+	// without caching a verdict for the artifact version.
+	ReviewObjectiveError ReviewKind = "objective_error"
 )
 
 // Review is one reviewer pass bound to an exact artifact version. It can never

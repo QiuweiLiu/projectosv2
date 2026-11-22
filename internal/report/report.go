@@ -50,7 +50,7 @@ func humanReason(text string) string {
 		return "已取消"
 	case strings.HasPrefix(text, "verification: command"):
 		if i := strings.Index(text, "failed:"); i > 0 {
-			return "验收命令执行失败" + clip(text[i+len("failed:"):], 120)
+			return "验收命令执行失败：" + clip(text[i+len("failed:"):], 120)
 		}
 		return "验收命令执行失败"
 	case strings.HasPrefix(text, "verification:"):
@@ -93,9 +93,9 @@ func Build(st *store.Store, obj goal.Objective) (Brief, error) {
 			continue
 		}
 		label := statusLabel[task.Status]
-		name := filepath.Base(task.ArtifactPath)
-		if name == "" {
-			name = string(task.ID)
+		name := string(task.ID)
+		if task.ArtifactPath != "" {
+			name = filepath.Base(task.ArtifactPath)
 		}
 		line := fmt.Sprintf("%s（%s）%s", task.ID, name, label)
 		switch task.Status {
@@ -208,7 +208,8 @@ func StateHash(obj goal.Objective, tasks []domain.Task) string {
 	copy(sorted, tasks)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
 	for _, t := range sorted {
-		fmt.Fprintf(&b, "%s:%s:%d:%d:%s\n", t.ID, t.Status, t.Attempts, t.PlanVersion, t.ArtifactPath)
+		fmt.Fprintf(&b, "%s:%s:%d:%d:%s:%s\n", t.ID, t.Status, t.Attempts, t.PlanVersion,
+			t.ArtifactPath, t.LastError)
 	}
 	sum := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(sum[:8])

@@ -57,6 +57,10 @@ func objectiveHash(req engine.ObjectiveReviewRequest) string {
 	h.Write([]byte{0})
 	h.Write([]byte(req.ExpectedOutcome))
 	h.Write([]byte{0})
+	for _, line := range req.Acceptance {
+		h.Write([]byte(line))
+		h.Write([]byte{0})
+	}
 	for _, line := range req.TaskSummary {
 		h.Write([]byte(line))
 		h.Write([]byte{0})

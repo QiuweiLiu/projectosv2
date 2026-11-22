@@ -347,6 +347,13 @@ func TestMatchServerUserMessageHandlesContextPrefixAndWrongID(t *testing.T) {
 	}); got != "" {
 		t.Fatalf("unknown matched %q", got)
 	}
+	// A short string in the middle of a different message is not a match.
+	if got := matchServerUserMessage([]opencodeserver.Message{{
+		ID: "msg_mid", Type: "user", Text: "please explain 你好 in detail",
+		Time: msgs[0].Time,
+	}}, conversation.Message{Role: "user", Text: "你好", CreatedAt: at}); got != "" {
+		t.Fatalf("mid-string matched %q", got)
+	}
 }
 
 func TestDetachObjectiveClearsConversationLink(t *testing.T) {
@@ -377,14 +384,67 @@ func TestDetachObjectiveClearsConversationLink(t *testing.T) {
 }
 
 func TestAutoApproveReadOnlyActions(t *testing.T) {
-	for _, action := range []string{"read", "list", "grep", "glob", "webfetch", "READ"} {
+	for _, action := range []string{"read", "list", "grep", "glob", "READ"} {
 		if !autoApproveReadOnly(action) {
 			t.Fatalf("%q should be auto-approved", action)
 		}
 	}
-	for _, action := range []string{"edit", "bash", "shell", "question", ""} {
+	for _, action := range []string{"edit", "bash", "shell", "webfetch", "WEBFETCH", "question", ""} {
 		if autoApproveReadOnly(action) {
 			t.Fatalf("%q must still ask", action)
+		}
+	}
+}
+
+func TestLocalOnlyRewindClearsOldSessionForRemoteMessage(t *testing.T) {
+	m, st, c := testManager(t)
+	user, err := st.AppendMessage(c.ID, "user", "remote turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetRemoteID(user.ID, "msg_remote_1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AppendMessage(c.ID, "assistant", "answer"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := m.Rewind(context.Background(), c.ID, user.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RemoteForked {
+		t.Fatalf("localOnly forked: %+v", res)
+	}
+	got, _, _ := st.Get(c.ID)
+	if got.SessionID != "" {
+		t.Fatalf("old session survived local-only rewind: %q", got.SessionID)
+	}
+}
+
+func TestDeterministicRiskRejectsObviousHighRisk(t *testing.T) {
+	for _, tc := range []struct {
+		action    string
+		resources []string
+	}{
+		{"webfetch", []string{"http://127.0.0.1:8799/api/status"}},
+		{"bash", []string{"rm -rf /tmp/x"}},
+		{"shell", []string{"git reset --hard HEAD~1"}},
+		{"edit", []string{"/etc/passwd"}},
+		{"edit", []string{"../outside.txt"}},
+	} {
+		if reason, high := deterministicRisk(tc.action, tc.resources); !high || reason == "" {
+			t.Fatalf("%s %v was not high risk", tc.action, tc.resources)
+		}
+	}
+	for _, tc := range []struct {
+		action    string
+		resources []string
+	}{
+		{"bash", []string{"python3 -m pytest"}},
+		{"edit", []string{"internal/app/main.go"}},
+	} {
+		if _, high := deterministicRisk(tc.action, tc.resources); high {
+			t.Fatalf("%s %v was marked high risk", tc.action, tc.resources)
 		}
 	}
 }

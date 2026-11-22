@@ -179,3 +179,13 @@ func TestMatchesChatHostNonASCII(t *testing.T) {
 		t.Fatal("prefix-only match must be refused")
 	}
 }
+
+func TestNewDoesNotCapRequestsBelowStartTimeout(t *testing.T) {
+	b := New(Config{})
+	if b.cfg.Client.Timeout != 0 {
+		t.Fatalf("global client timeout = %v, want 0", b.cfg.Client.Timeout)
+	}
+	if b.cfg.StartTimeout < time.Minute {
+		t.Fatalf("start timeout = %v", b.cfg.StartTimeout)
+	}
+}

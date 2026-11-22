@@ -141,10 +141,12 @@ func Assemble(st *store.Store, dir string) (int, error) {
 			return count, fmt.Errorf("task %s artifact escapes the tree: %q", t.ID, t.ArtifactPath)
 		}
 		target := filepath.Join(root, clean)
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		// Check every existing component before creating directories: MkdirAll
+		// through a symlinked parent would create directories outside out/.
+		if err := noSymlinkPath(root, clean); err != nil {
 			return count, err
 		}
-		if err := noSymlinkPath(root, clean); err != nil {
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return count, err
 		}
 		// The final path may itself be a symlink; O_NOFOLLOW makes the write
@@ -235,7 +237,10 @@ func noSymlinkPath(root, rel string) error {
 		path = filepath.Join(path, part)
 		info, err := os.Lstat(path)
 		if err != nil {
-			continue
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("refusing to write through symlink %s", path)

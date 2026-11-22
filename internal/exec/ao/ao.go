@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -40,7 +41,17 @@ func New(cfg Config) *Backend {
 		cfg.Harness = "opencode-v2"
 	}
 	if cfg.Client == nil {
-		cfg.Client = &http.Client{Timeout: 30 * time.Second}
+		// No global Client.Timeout: it would cap Start below StartTimeout.
+		// Each request gets a context deadline in do(); Start passes its own
+		// longer context.
+		cfg.Client = &http.Client{Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: time.Second,
+			MaxIdleConns:          20,
+			IdleConnTimeout:       90 * time.Second,
+		}}
 	}
 	if cfg.StartTimeout == 0 {
 		cfg.StartTimeout = 3 * time.Minute
@@ -56,6 +67,11 @@ type apiError struct {
 }
 
 func (b *Backend) do(ctx context.Context, method, path string, body any, out any) (int, error) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+	}
 	var reader io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)

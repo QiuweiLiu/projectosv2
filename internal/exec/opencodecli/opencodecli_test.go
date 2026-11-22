@@ -271,3 +271,35 @@ func TestDependencyFilesAreSeededAndNotReportedAsChanges(t *testing.T) {
 		}
 	}
 }
+
+func TestCollectEstimatesOutputWhenProviderUsageMissing(t *testing.T) {
+	work := t.TempDir()
+	script := filepath.Join(t.TempDir(), "fake-no-usage.sh")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+printf 'hello' > hello.txt
+echo '{"type":"text","sessionID":"ses_fake","part":{"type":"text","text":"ok"}}'
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b := New(Config{Model: "provider/model", Bin: script, WorkRoot: work})
+	start, err := b.Start(context.Background(), exec.StartRequest{
+		TaskID: "T1", Attempt: 1, Prompt: "p", ApprovalMode: "default",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitDone(t, b, start.ExternalID)
+	artifact, err := b.Collect(context.Background(), start.ExternalID, "hello.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Result != "hello" {
+		t.Fatalf("artifact = %q", artifact.Result)
+	}
+	if artifact.OutputTokens <= 0 {
+		t.Fatalf("missing provider usage was not estimated: %+v", artifact)
+	}
+	if !artifact.UsageEstimated {
+		t.Fatalf("estimated usage not marked: %+v", artifact)
+	}
+}

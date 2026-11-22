@@ -3,7 +3,6 @@
 package replan
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"projectos/kernel/internal/domain"
 	"projectos/kernel/internal/goal"
 	"projectos/kernel/internal/store"
+	"projectos/kernel/internal/verify"
 )
 
 const (
@@ -25,10 +25,19 @@ func FailureContext(st *store.Store, old goal.Plan) (string, []domain.TaskID, []
 	if err != nil {
 		return "", nil, nil, err
 	}
+	oldIDs := map[domain.TaskID]bool{}
+	for _, t := range old.Tasks {
+		oldIDs[domain.TaskID(t.ID)] = true
+	}
 	accepted := map[domain.TaskID]bool{}
 	var failed []domain.TaskID
 	var lines []string
 	for _, t := range tasks {
+		// A store can hold tasks from several plan versions. Only failures of
+		// the plan being replaced belong in the feedback.
+		if !oldIDs[t.ID] {
+			continue
+		}
 		switch t.Status {
 		case domain.TaskAccepted:
 			accepted[t.ID] = true
@@ -50,7 +59,7 @@ func FailureContext(st *store.Store, old goal.Plan) (string, []domain.TaskID, []
 	context := "The following tasks failed and must be fixed by adding new tasks:\n" +
 		strings.Join(lines, "\n") +
 		"\nKeep every already accepted task exactly as it is: " + strings.Join(acceptedIDs, ", ") +
-		"\nAdd at most 5 new tasks; do not rename or modify accepted tasks."
+		fmt.Sprintf("\nAdd at most %d new tasks; do not rename or modify accepted tasks.", MaxNewTasks)
 	return context, failed, acceptedIDs, nil
 }
 
@@ -150,33 +159,51 @@ func NormalizeAccepted(old, next goal.Plan, accepted []string) goal.Plan {
 }
 
 func sameExecutionShape(a, b goal.PlanTask) bool {
-	if len(a.Artifacts) == 0 || len(b.Artifacts) == 0 || a.Artifacts[0] != b.Artifacts[0] {
+	if len(a.Artifacts) != len(b.Artifacts) {
 		return false
 	}
-	da, _ := json.Marshal(a.Deps)
-	db, _ := json.Marshal(b.Deps)
-	if string(da) != string(db) {
+	for i := range a.Artifacts {
+		if a.Artifacts[i] != b.Artifacts[i] {
+			return false
+		}
+	}
+	da := append([]string(nil), a.Deps...)
+	db := append([]string(nil), b.Deps...)
+	sort.Strings(da)
+	sort.Strings(db)
+	if strings.Join(da, "\x00") != strings.Join(db, "\x00") {
 		return false
 	}
-	ra, _ := json.Marshal(a.Validators)
-	rb, _ := json.Marshal(b.Validators)
-	if string(ra) != string(rb) {
-		return false
+	va := canonicalValidators(a.Validators)
+	vb := canonicalValidators(b.Validators)
+	return strings.Join(va, "\x00") == strings.Join(vb, "\x00") && a.MaxAttempts == b.MaxAttempts
+}
+
+func canonicalValidators(in []verify.Spec) []string {
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		out = append(out, v.Type+"\x00"+v.Command+"\x00"+v.Expect)
 	}
-	return a.MaxAttempts == b.MaxAttempts
+	sort.Strings(out)
+	return out
 }
 
 // Apply records the replacement plan, supersedes tasks it drops, then activates
 // the new version. It returns how many tasks were retired.
 func Apply(st *store.Store, objectiveID string, version int, old, new goal.Plan, hash string) (int, error) {
+	tasks, err := st.List()
+	if err != nil {
+		return 0, err
+	}
 	// Carry accepted tasks forward verbatim: a model may paraphrase them, and a
 	// plan record that disagrees with what actually ran is a lie.
 	var acceptedIDs []string
-	if tasks, err := st.List(); err == nil {
-		for _, t := range tasks {
-			if t.Status == domain.TaskAccepted {
-				acceptedIDs = append(acceptedIDs, string(t.ID))
-			}
+	for _, t := range tasks {
+		if t.Status == domain.TaskAccepted {
+			acceptedIDs = append(acceptedIDs, string(t.ID))
+		}
+		if t.Status == domain.TaskRunning {
+			return 0, fmt.Errorf("task %s is still running; stop it before replanning", t.ID)
 		}
 	}
 	new = NormalizeAccepted(old, new, acceptedIDs)
@@ -184,10 +211,6 @@ func Apply(st *store.Store, objectiveID string, version int, old, new goal.Plan,
 	newIDs := map[string]bool{}
 	for _, t := range new.Tasks {
 		newIDs[t.ID] = true
-	}
-	tasks, err := st.List()
-	if err != nil {
-		return 0, err
 	}
 	var superseded []domain.TaskID
 	for _, t := range tasks {

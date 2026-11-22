@@ -176,7 +176,8 @@ func Start(ctx context.Context, cfg Config) (*Server, error) {
 		close(s.done)
 	}()
 
-	timer := time.NewTimer(cfg.StartupTimeout)
+	deadline := time.Now().Add(cfg.StartupTimeout)
+	timer := time.NewTimer(time.Until(deadline))
 	defer timer.Stop()
 	select {
 	case pw := <-password:
@@ -184,16 +185,35 @@ func Start(ctx context.Context, cfg Config) (*Server, error) {
 	case <-timer.C:
 		s.Stop()
 		return nil, fmt.Errorf("opencode server did not print a password: %s", s.tail())
+	case <-s.done:
+		s.Stop()
+		return nil, fmt.Errorf("opencode server exited before printing a password: %s", s.tail())
 	case <-ctx.Done():
 		s.Stop()
 		return nil, ctx.Err()
 	}
-	deadline := time.Now().Add(cfg.StartupTimeout)
 	for time.Now().Before(deadline) {
+		select {
+		case <-s.done:
+			s.Stop()
+			return nil, fmt.Errorf("opencode server exited during startup: %s", s.tail())
+		case <-ctx.Done():
+			s.Stop()
+			return nil, ctx.Err()
+		default:
+		}
 		if s.healthy(ctx) {
 			return s, nil
 		}
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-time.After(100 * time.Millisecond):
+		case <-s.done:
+			s.Stop()
+			return nil, fmt.Errorf("opencode server exited during startup: %s", s.tail())
+		case <-ctx.Done():
+			s.Stop()
+			return nil, ctx.Err()
+		}
 	}
 	s.Stop()
 	return nil, fmt.Errorf("opencode server did not become ready: %s", s.tail())
@@ -209,25 +229,54 @@ func freePort(host string) (int, error) {
 }
 
 func (s *Server) scan(r io.Reader, password chan<- string) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		if strings.Contains(line, "server password") {
-			fields := strings.Fields(line)
-			if len(fields) > 0 {
-				select {
-				case password <- fields[len(fields)-1]:
-				default:
-				}
-				s.addLog("server password: [redacted]")
-				continue
+	// Drain the child's stdout/stderr even for very long lines. A Scanner with
+	// a 1MB cap stops on ErrTooLong and leaves the io.Pipe writer blocked
+	// forever, deadlocking the whole server.
+	if closer, ok := r.(io.Closer); ok {
+		defer closer.Close()
+	}
+	const maxLine = 1 << 20
+	reader := bufio.NewReaderSize(r, 64<<10)
+	var line []byte
+	overflow := false
+	for {
+		frag, err := reader.ReadSlice('\n')
+		if !overflow {
+			if len(line)+len(frag) > maxLine {
+				line = append(line, frag[:maxLine-len(line)]...)
+				overflow = true
+			} else {
+				line = append(line, frag...)
 			}
 		}
-		s.addLog(line)
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		if len(line) > 0 {
+			text := strings.TrimSpace(string(line))
+			if overflow {
+				text += " …[truncated]"
+			}
+			if text != "" {
+				if strings.Contains(text, "server password") {
+					fields := strings.Fields(text)
+					if len(fields) > 0 {
+						select {
+						case password <- fields[len(fields)-1]:
+						default:
+						}
+						s.addLog("server password: [redacted]")
+					}
+				} else {
+					s.addLog(text)
+				}
+			}
+		}
+		line = line[:0]
+		overflow = false
+		if err != nil {
+			return
+		}
 	}
 }
 

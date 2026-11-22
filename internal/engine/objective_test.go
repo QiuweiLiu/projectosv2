@@ -17,13 +17,14 @@ import (
 type fakeObjectiveJudge struct {
 	calls    int
 	findings []domain.Finding
+	err      error
 	last     ObjectiveReviewRequest
 }
 
 func (f *fakeObjectiveJudge) JudgeObjective(_ context.Context, req ObjectiveReviewRequest) (ReviewOutcome, error) {
 	f.calls++
 	f.last = req
-	return ReviewOutcome{Findings: f.findings, PromptTokens: 10, OutputTokens: 5}, nil
+	return ReviewOutcome{Findings: f.findings, PromptTokens: 10, OutputTokens: 5}, f.err
 }
 
 func acceptedTask(t *testing.T, st *store.Store, objectiveID string) {
@@ -220,5 +221,44 @@ func TestObjectiveJudgeFailsClosedOnClosedStore(t *testing.T) {
 	st.Close()
 	if _, err := e.JudgeObjective(context.Background(), obj, plan); err == nil {
 		t.Fatal("closed store did not fail closed")
+	}
+}
+
+func TestObjectiveJudgeTransientErrorIsNotCached(t *testing.T) {
+	st, obj, plan := objectiveFixture(t)
+	defer st.Close()
+	judge := &fakeObjectiveJudge{err: fmt.Errorf("transient network error")}
+	e := New(st, exec.NewFake(1), 1, nil).WithObjectiveJudge(judge)
+	if _, err := e.JudgeObjective(context.Background(), obj, plan); err == nil {
+		t.Fatal("transient error was hidden")
+	}
+	judge.err = nil
+	blocked, err := e.JudgeObjective(context.Background(), obj, plan)
+	if err != nil || blocked {
+		t.Fatalf("retry = %v %v", blocked, err)
+	}
+	if judge.calls != 2 {
+		t.Fatalf("judge calls = %d, want 2 (first failure must not be cached)", judge.calls)
+	}
+}
+
+func TestObjectiveJudgeReusesCachedVerdictAfterBudgetExhausted(t *testing.T) {
+	st, obj, plan := objectiveFixture(t)
+	defer st.Close()
+	judge := &fakeObjectiveJudge{}
+	e := New(st, exec.NewFake(1), 1, nil).WithObjectiveJudge(judge).WithBudget(Budget{MaxReviews: 1})
+	if blocked, err := e.JudgeObjective(context.Background(), obj, plan); err != nil || blocked {
+		t.Fatalf("first judge = %v %v", blocked, err)
+	}
+	judge.findings = []domain.Finding{{Severity: domain.SeverityP1, Code: "late", Message: "late finding"}}
+	blocked, err := e.JudgeObjective(context.Background(), obj, plan)
+	if err != nil {
+		t.Fatalf("cached verdict after budget: %v", err)
+	}
+	if blocked {
+		t.Fatal("cached clean verdict was replaced by a second judgment")
+	}
+	if judge.calls != 1 {
+		t.Fatalf("judge calls = %d, want 1", judge.calls)
 	}
 }

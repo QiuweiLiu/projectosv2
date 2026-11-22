@@ -21,14 +21,14 @@ type Line struct {
 // Text compares two strings line by line. It returns an error only when the
 // input is too large; a nil slice means the inputs are identical.
 func Text(old, new string) ([]Line, error) {
+	if old == new {
+		return nil, nil
+	}
 	if len(old) > MaxBytes || len(new) > MaxBytes {
 		return nil, fmt.Errorf("file exceeds %d bytes", MaxBytes)
 	}
 	a := strings.Split(strings.ReplaceAll(old, "\r\n", "\n"), "\n")
 	b := strings.Split(strings.ReplaceAll(new, "\r\n", "\n"), "\n")
-	if len(a) > MaxLines || len(b) > MaxLines {
-		return nil, fmt.Errorf("file exceeds %d lines", MaxLines)
-	}
 	// Trim the artificial trailing empty line so a final newline does not show
 	// up as a changed line.
 	if len(a) > 0 && a[len(a)-1] == "" {
@@ -36,6 +36,9 @@ func Text(old, new string) ([]Line, error) {
 	}
 	if len(b) > 0 && b[len(b)-1] == "" {
 		b = b[:len(b)-1]
+	}
+	if len(a) > MaxLines || len(b) > MaxLines {
+		return nil, fmt.Errorf("file exceeds %d lines", MaxLines)
 	}
 	lcs := make([][]int, len(a)+1)
 	for i := range lcs {
