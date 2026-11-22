@@ -34,7 +34,11 @@ func matchServerUserMessage(msgs []opencodeserver.Message, target conversation.M
 	if text == "" {
 		return ""
 	}
-	best, bestDelta := "", int64((10*time.Minute)/time.Millisecond)
+	type candidate struct {
+		id    string
+		delta int64
+	}
+	var candidates []candidate
 	for _, msg := range msgs {
 		if msg.Type != "user" || msg.ID == "" {
 			continue
@@ -48,15 +52,48 @@ func matchServerUserMessage(msgs []opencodeserver.Message, target conversation.M
 			continue
 		}
 		if target.CreatedAt.IsZero() {
-			return msg.ID
+			candidates = append(candidates, candidate{id: msg.ID})
+			continue
 		}
 		delta := msg.Time.Created - target.CreatedAt.UnixMilli()
 		if delta < 0 {
 			delta = -delta
 		}
-		if delta < bestDelta {
-			best, bestDelta = msg.ID, delta
+		if delta <= int64((10*time.Minute)/time.Millisecond) {
+			candidates = append(candidates, candidate{id: msg.ID, delta: delta})
 		}
+	}
+	if len(candidates) == 0 {
+		return ""
+	}
+	if target.CreatedAt.IsZero() {
+		if len(candidates) == 1 {
+			return candidates[0].id
+		}
+		return ""
+	}
+	minDelta := candidates[0].delta
+	for _, c := range candidates[1:] {
+		if c.delta < minDelta {
+			minDelta = c.delta
+		}
+	}
+	// Duplicate text is common ("ok", "继续"). If two copies are within a
+	// clock-skew window of the nearest match, forking either one may cut the
+	// wrong boundary; ask for a local-only retry instead.
+	const ambiguityWindow = int64((2 * time.Second) / time.Millisecond)
+	best := ""
+	matches := 0
+	for _, c := range candidates {
+		if c.delta <= minDelta+ambiguityWindow {
+			matches++
+			if c.delta == minDelta {
+				best = c.id
+			}
+		}
+	}
+	if matches != 1 {
+		return ""
 	}
 	return best
 }
@@ -175,7 +212,11 @@ func (m *Manager) Rewind(ctx context.Context, conversationID, messageID string, 
 	cleared := false
 	if remoteForked {
 		m.mu.Lock()
-		delete(m.sessions, c.SessionID)
+		if c.SessionID != "" && c.SessionID != sessionID {
+			// The fork is the live session now; late events from the old one
+			// must not resolve to this conversation again.
+			delete(m.sessions, c.SessionID)
+		}
 		m.sessions[sessionID] = conversationID
 		m.mu.Unlock()
 	} else if removedHasRemote {

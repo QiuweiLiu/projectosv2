@@ -1005,9 +1005,26 @@ typedef NS_ENUM(NSInteger, TabState) {
 - (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction
     decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     NSURL *url = navigationAction.request.URL;
-    NSString *scheme = url.scheme.lowercaseString;
+    NSString *scheme = url.scheme.lowercaseString ?: @"";
+    NSString *host = url.host.lowercaseString ?: @"";
+    if ([scheme isEqualToString:@"about"]) {
+        // about:blank is the initial document and the target of window.open
+        // without a URL; no other about: page belongs in the app.
+        NSString *absolute = url.absoluteString.lowercaseString ?: @"";
+        decisionHandler([absolute isEqualToString:@"about:blank"] ? WKNavigationActionPolicyAllow
+                                                                  : WKNavigationActionPolicyCancel);
+        return;
+    }
     if ([scheme isEqualToString:@"http"] || [scheme isEqualToString:@"https"]) {
-        decisionHandler(WKNavigationActionPolicyAllow);
+        // The WebView only hosts the local kernel UI. External links leave the
+        // app and open in the user's browser.
+        if ([host isEqualToString:@"localhost"] || [host isEqualToString:@"127.0.0.1"] ||
+            [host isEqualToString:@"::1"] || [host isEqualToString:@"[::1]"]) {
+            decisionHandler(WKNavigationActionPolicyAllow);
+            return;
+        }
+        [[NSWorkspace sharedWorkspace] openURL:url];
+        decisionHandler(WKNavigationActionPolicyCancel);
         return;
     }
     decisionHandler(WKNavigationActionPolicyCancel);

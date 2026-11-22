@@ -154,6 +154,21 @@ func TestQueryTokensKeepShortTechnicalWords(t *testing.T) {
 	}
 }
 
+func TestRenderSummaryStaysWithinTinyBudgets(t *testing.T) {
+	entry := Entry{ProjectID: "p", ObjectiveID: "obj", TaskID: "T1", Kind: KindArtifact,
+		Trust: TrustPublished, ArtifactPath: "a.txt", Version: "v1",
+		Title: "中文摘要", Content: strings.Repeat("内容", 100), UpdatedAt: time.Now()}
+	for _, available := range []int{2, 5, 9, 17, 31, 64} {
+		text := renderSummary(entry, available)
+		if len(text) > available {
+			t.Fatalf("summary %d bytes exceeds budget %d: %q", len(text), available, text)
+		}
+		if !utf8.ValidString(text) {
+			t.Fatalf("summary split a UTF-8 rune at budget %d: %q", available, text)
+		}
+	}
+}
+
 func TestRenderSummaryKeepsTruncationMarkerForPublishedArtifacts(t *testing.T) {
 	entry := Entry{ProjectID: "p", ObjectiveID: "obj", TaskID: "T1", Kind: KindArtifact,
 		Trust: TrustPublished, ArtifactPath: "a.txt", Version: "v1",

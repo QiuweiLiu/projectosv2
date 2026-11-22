@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -530,5 +531,324 @@ func TestWaitRiskTextAcceptsAnIdleMarker(t *testing.T) {
 	text, err := waitRiskText(context.Background(), fetch, 2*time.Second)
 	if err != nil || text != `{"risk":"high"}` || calls != 1 {
 		t.Fatalf("text=%q calls=%d err=%v", text, calls, err)
+	}
+}
+
+func TestShellPolicyRejectsPathObfuscation(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(root, "link_to_secret")); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manager{cfg: Config{Root: root}}
+	c := conversation.Conversation{Dir: root}
+	cases := []struct {
+		command string
+		want    riskDecision
+	}{
+		{"cat ." + "env", riskPrompt},
+		{"cat ." + "ENV", riskPrompt},
+		{"head id_" + "rsa", riskPrompt},
+		{`cat "/etc/passwd"`, riskPrompt},
+		{"cat ../outside.txt", riskPrompt},
+		{"cat link_to_secret", riskPrompt},
+		{"cat </etc/passwd", riskAskModel},
+		{"cat \\\n/etc/passwd", riskPrompt},
+		{"cat $(pwd)/." + "env", riskAskModel},
+	}
+	for _, tc := range cases {
+		got, _ := m.permissionDecision(c, "bash", []string{tc.command})
+		if got != tc.want {
+			t.Fatalf("%q = %d, want %d", tc.command, got, tc.want)
+		}
+		if got == riskAllow {
+			t.Fatalf("%q was auto-approved", tc.command)
+		}
+	}
+}
+
+func TestShellPolicyKeepsQuotedLiterals(t *testing.T) {
+	root := t.TempDir()
+	m := &Manager{cfg: Config{Root: root}}
+	c := conversation.Conversation{Dir: root}
+	for _, command := range []string{
+		`rg "foo|bar" internal/`,
+		`grep "rm -rf" docs/`,
+		`go test -run Test_reboot`,
+		`rg "curl " .`,
+		`cat "*.env"`,
+	} {
+		if got, _ := m.permissionDecision(c, "bash", []string{command}); got != riskAllow {
+			t.Fatalf("%q = %d, want allow", command, got)
+		}
+	}
+}
+
+func TestApprovalPolicyRejectsDangerousFlags(t *testing.T) {
+	root := t.TempDir()
+	m := &Manager{cfg: Config{Root: root}}
+	c := conversation.Conversation{Dir: root}
+	for _, command := range []string{
+		`go test -toolexec sh ./...`,
+		`go build -toolexec=sh ./...`,
+		`find . -ok echo {} ;`,
+		`find . -okdir echo {} ;`,
+		`find . -fprint out.txt`,
+		`find . -fprintf out.txt %p`,
+		`find . -fls out.txt`,
+		`git branch --delete old`,
+		`git branch --move old new`,
+		`git branch -M main`,
+		`git branch -f main HEAD~1`,
+		`git -C repo branch -D old`,
+		`git -c core.pager=cat reset --hard HEAD~1`,
+	} {
+		if got, _ := m.permissionDecision(c, "bash", []string{command}); got != riskPrompt {
+			t.Fatalf("%q = %d, want prompt", command, got)
+		}
+	}
+}
+
+func TestApprovalRulesRefuseDangerousPrefixes(t *testing.T) {
+	root := t.TempDir()
+	m := &Manager{cfg: Config{Root: root}}
+	for _, command := range []string{
+		`python3 -c "print(1)"`,
+		`bash -c "ls"`,
+		`git checkout main`,
+		`git -C repo checkout main`,
+		`git reset --soft HEAD~1`,
+		`npm --prefix app run deploy`,
+		`env FOO=1 make test`,
+		`nohup make test`,
+	} {
+		m.recordApprovalRule("bash", []string{command})
+		commands, ok := splitShell(command)
+		if !ok || len(commands) != 1 {
+			t.Fatalf("tokenize %q", command)
+		}
+		if ruleMatches(m.approvalRules(), "bash", commands[0]) {
+			t.Fatalf("%q was remembered as always-allow", command)
+		}
+	}
+	m.recordApprovalRule("bash", []string{"make test"})
+	if !ruleMatches(m.approvalRules(), "bash", []string{"make", "test"}) {
+		t.Fatal("safe command was not remembered")
+	}
+}
+
+func TestResolvePathFailsClosedAfterDepthLimit(t *testing.T) {
+	root := t.TempDir()
+	deep := filepath.Join(root, strings.Repeat("missing/", maxSymlinkDepth+2), "x.txt")
+	if _, err := resolvePath(root, deep); err == nil {
+		t.Fatal("resolvePath accepted a path deeper than its parent walk")
+	}
+}
+
+func TestShellPolicyRejectsMoreCredentialFiles(t *testing.T) {
+	root := t.TempDir()
+	m := &Manager{cfg: Config{Root: root}}
+	c := conversation.Conversation{Dir: root}
+	for _, command := range []string{
+		"cat .envrc",
+		"cat .npmrc",
+		"cat credentials.json",
+		"cat id_ecdsa",
+		"cat control-token",
+		"cat secrets.toml",
+		"cat secrets.env",
+	} {
+		if got, _ := m.permissionDecision(c, "bash", []string{command}); got != riskPrompt {
+			t.Fatalf("%q = %d, want prompt", command, got)
+		}
+	}
+}
+
+func TestShellPolicyGatesBroadContentDumps(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "internal"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manager{cfg: Config{Root: root}}
+	c := conversation.Conversation{Dir: root}
+	blocked := []struct {
+		command string
+		want    riskDecision
+	}{
+		{"env", riskPrompt},
+		{"env -0", riskPrompt},
+		{"env FOO=1", riskPrompt},
+		{"grep -R . .", riskPrompt},
+		{`grep -rn "secret" .`, riskPrompt},
+		{"rg --hidden --no-ignore --follow . .", riskPrompt},
+		{"rg -uu foo", riskPrompt},
+		{"git show HEAD:." + "env", riskPrompt},
+		{"git log -p", riskPrompt},
+		{"git show HEAD", riskPrompt},
+		{"git diff", riskPrompt},
+		{"git diff HEAD", riskPrompt},
+		{"git diff --cached", riskPrompt},
+		{"git diff -- ." + "env", riskPrompt},
+		{"git diff -- internal/", riskPrompt},
+		{"git diff -- 'secrets.*'", riskPrompt},
+		{"git show 'HEAD:secrets.*'", riskPrompt},
+		{"git diff -- ':(glob)secrets.toml'", riskPrompt},
+		{"git diff -- ':(top)secrets.toml'", riskPrompt},
+		{"git diff -- ':(literal)credentials.json'", riskPrompt},
+		{"git diff --exit-code", riskPrompt},
+		{"git show --exit-code HEAD", riskPrompt},
+		{"git log --patch-with-stat", riskPrompt},
+		{"git log -c", riskPrompt},
+		{"git show --stat --patch-with-stat HEAD", riskPrompt},
+	}
+	for _, tc := range blocked {
+		if got, _ := m.permissionDecision(c, "bash", []string{tc.command}); got != tc.want {
+			t.Fatalf("%q = %d, want %d", tc.command, got, tc.want)
+		}
+	}
+	for _, command := range []string{
+		`rg "foo" internal/`,
+		`grep -r foo internal/`,
+		"git show --stat HEAD",
+		"git log --oneline",
+		"git show HEAD:src/app.go",
+		"git diff --stat",
+		"git diff --stat --exit-code",
+		"git diff HEAD -- src/app.go",
+		"git show --raw HEAD",
+	} {
+		if got, _ := m.permissionDecision(c, "bash", []string{command}); got != riskAllow {
+			t.Fatalf("%q = %d, want allow", command, got)
+		}
+	}
+}
+
+func TestShellPolicyResolvesSymlinkBeforeParentAndAfterDoubleDash(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "root")
+	outside := filepath.Join(base, "outside")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(base, "secret.txt")
+	if err := os.WriteFile(secret, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(root, "-link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(root, "link_file")); err != nil {
+		t.Fatal(err)
+	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realSecret, err := filepath.EvalSymlinks(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := resolvePath(root, "link/../secret.txt")
+	if err != nil || resolved != realSecret {
+		t.Fatalf("resolvePath = %q %v, want %q", resolved, err, realSecret)
+	}
+	if insideRoot(realRoot, resolved) {
+		t.Fatalf("symlink/.. resolution reported an inside-root path: %q", resolved)
+	}
+	if _, err := resolvePath(root, "missing/../link/../secret.txt"); err == nil {
+		t.Fatal("resolvePath accepted missing/.. through an existing symlink")
+	}
+	m := &Manager{cfg: Config{Root: root}}
+	c := conversation.Conversation{Dir: root}
+	for _, command := range []string{
+		"cat link/../secret.txt",
+		"cat -- -link",
+		"gofmt -w link_file",
+		"gofmt -w -- -link",
+		"go fmt link_file",
+		"pytest link_file",
+		"python3 -m pytest link_file",
+		"cargo test --manifest-path link_file",
+		"go test link_file",
+		"npm test link_file",
+		"git diff --no-index -- link_file link_file",
+		"git show HEAD:link_file",
+		"git diff --stat --output link_file",
+		"go -C link_file test",
+		"npm --prefix link_file run build",
+	} {
+		if got, _ := m.permissionDecision(c, "bash", []string{command}); got != riskPrompt {
+			t.Fatalf("%q = %d, want prompt", command, got)
+		}
+	}
+}
+
+func TestLegacyRulesCannotBypassUnsafePrefixes(t *testing.T) {
+	root := t.TempDir()
+	m := &Manager{cfg: Config{Root: root}}
+	rules := approvalRulesFile{Allow: []approvalRule{
+		{Action: "bash", Prefix: []string{"nohup"}},
+		{Action: "bash", Prefix: []string{"python3", "-c"}},
+		{Action: "bash", Prefix: []string{"git", "checkout"}},
+		{Action: "bash", Prefix: []string{"make"}},
+	}}
+	raw, err := json.Marshal(rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(m.approvalRulesPath(), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := conversation.Conversation{Dir: root}
+	for _, command := range []string{
+		"nohup make test",
+		`python3 -c "print(1)"`,
+		"git checkout main",
+		"make deploy",
+	} {
+		if got, _ := m.permissionDecision(c, "bash", []string{command}); got == riskAllow {
+			t.Fatalf("%q was allowed by a legacy rule", command)
+		}
+	}
+}
+
+func TestMatchServerUserMessageRejectsAmbiguousDuplicates(t *testing.T) {
+	at := time.Now().UTC()
+	target := conversation.Message{Text: "ok", CreatedAt: at}
+	mk := func(id string, offsetMS int64) opencodeserver.Message {
+		var msg opencodeserver.Message
+		msg.ID = id
+		msg.Type = "user"
+		msg.Text = "ok"
+		msg.Time.Created = at.UnixMilli() + offsetMS
+		return msg
+	}
+	cases := []struct {
+		name   string
+		msgs   []opencodeserver.Message
+		target conversation.Message
+		want   string
+	}{
+		{"unique", []opencodeserver.Message{mk("a", 0)}, target, "a"},
+		{"duplicate-near", []opencodeserver.Message{mk("a", 0), mk("b", 500)}, target, ""},
+		{"duplicate-exact", []opencodeserver.Message{mk("a", 0), mk("b", 0)}, target, ""},
+		{"far", []opencodeserver.Message{mk("a", -5000), mk("b", 0)}, target, "b"},
+		{"outside-window", []opencodeserver.Message{mk("a", 0), mk("b", 10000)}, target, "a"},
+		{"zero-target", []opencodeserver.Message{mk("a", 0), mk("b", 10000)}, conversation.Message{Text: "ok"}, ""},
+	}
+	for _, tc := range cases {
+		if got := matchServerUserMessage(tc.msgs, tc.target); got != tc.want {
+			t.Fatalf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }

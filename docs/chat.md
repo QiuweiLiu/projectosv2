@@ -197,10 +197,15 @@ Goal Draft；不会自动创建目标或执行。短句由客户端识别后走�
 - 三层漏斗：本地规则 → 会话记忆 → 模型裁判；
 - 第一层（始终生效，不等开关）：项目工作区内的编辑/写入、只读检查、常见
   `go test/build/vet`、`npm/pnpm test|run build|lint`、`pytest`、`cargo test/check/build`
-  自动允许；工作区外路径、凭据/`.git` 等敏感路径、`webfetch`、`rm -rf`、`sudo`、
-  force push/hard reset 等直接弹人工卡；其余灰区命令交给下一层；
+  自动允许；工作区外路径、凭据/`.git`/`.envrc`/`.npmrc`/`control-token` 等敏感路径、
+  `webfetch`、`rm -rf`、`sudo`、force push/hard reset 等直接弹人工卡；路径按真实 argv
+  解析（引号、`--`、软链接与 `link/..` 都不会被词法清理绕过），测试命令的裸文件/目录
+  参数也按软链接解析；裸 `env`、根目录递归 `grep`、`rg --hidden/--no-ignore`、
+  `git show <rev>:<敏感路径>`、`git show`/`git diff` 默认 patch、`git log -p` 等内容转储
+  直接人工；其余灰区命令交给下一层；
 - 第二层：操作者点“总是允许”时把命令前缀写入工作区 `approval-rules.json`，下次同前缀
-  直接允许，但仍受第一层黑名单约束；
+  直接允许，但仍受第一层黑名单约束；解释器/代理/git checkout 等危险前缀、单字前缀、
+  带 `-C/--prefix` 等前置全局选项的命令不落盘，旧规则同样按此校验；
 - 第三层：输入区“帮我审批：开/关”开关（持久化 `conversations.auto_approve`）。开启后
   灰区命令由工具禁用的**轻量模型**做风险分类 `{"risk":"low"|"high","reason":"..."}`，
   低风险自动 `once`，高风险弹卡并附原因；模型失败、超时或不确定时按高风险处理；

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -116,9 +117,16 @@ func markdown(r Report) string {
 	return out
 }
 
+// assembleMu serializes assemblies in this process. Two concurrent Assemblies
+// would each build a complete tree and publish it over the other; the slower
+// one would then delete the tree the faster one just published.
+var assembleMu sync.Mutex
+
 // Assemble copies every accepted artifact into <dir>/out so the delivered tree
 // is usable as a whole, not just as per-task fragments.
 func Assemble(st *store.Store, dir string) (int, error) {
+	assembleMu.Lock()
+	defer assembleMu.Unlock()
 	tasks, err := st.List()
 	if err != nil {
 		return 0, err
@@ -138,6 +146,11 @@ func Assemble(st *store.Store, dir string) (int, error) {
 		return 0, err
 	}
 	defer os.RemoveAll(tmp)
+	// MkdirTemp creates 0700; the published tree must stay readable to the
+	// desktop UI, /files and VerifyAssembled.
+	if err := os.Chmod(tmp, 0o755); err != nil {
+		return 0, err
+	}
 	count := 0
 	for _, t := range tasks {
 		if t.Status != domain.TaskAccepted || t.ArtifactPath == "" {
@@ -181,23 +194,36 @@ func Assemble(st *store.Store, dir string) (int, error) {
 
 // swapOut replaces dir/out with tmp. The rename sequence is atomic per step;
 // the brief window where out/ does not exist is preferable to serving a mixed
-// old/new tree.
+// old/new tree. The backup lives in a uniquely named staging directory, so a
+// leftover from a failed cleanup can never collide with a later assembly.
 func swapOut(dir, tmp, root string) error {
-	backup := ""
+	backupDir := ""
 	if _, err := os.Lstat(root); err == nil {
-		backup = filepath.Join(dir, fmt.Sprintf(".out.old-%d", time.Now().UnixNano()))
-		if err := os.Rename(root, backup); err != nil {
+		var err error
+		backupDir, err = os.MkdirTemp(dir, ".out.old-")
+		if err != nil {
+			return fmt.Errorf("stage old delivery: %w", err)
+		}
+		if err := os.Rename(root, filepath.Join(backupDir, "out")); err != nil {
+			_ = os.RemoveAll(backupDir)
 			return fmt.Errorf("stage old delivery: %w", err)
 		}
 	}
 	if err := os.Rename(tmp, root); err != nil {
-		if backup != "" {
-			_ = os.Rename(backup, root)
+		if backupDir != "" {
+			backup := filepath.Join(backupDir, "out")
+			if restoreErr := os.Rename(backup, root); restoreErr != nil {
+				// The backup is now the only complete tree. Keep it and name
+				// its path so an operator can recover it.
+				return fmt.Errorf("publish delivery: %w (restore failed: %v; old delivery kept at %s)",
+					err, restoreErr, backup)
+			}
+			_ = os.RemoveAll(backupDir)
 		}
 		return fmt.Errorf("publish delivery: %w", err)
 	}
-	if backup != "" {
-		_ = os.RemoveAll(backup)
+	if backupDir != "" {
+		_ = os.RemoveAll(backupDir)
 	}
 	return nil
 }

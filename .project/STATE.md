@@ -59,9 +59,9 @@ Kernel 仍是 Task/Run/Evidence/Review 唯一权威；没有第二套 Scheduler 
   question 工具通过 OpenCode form 渲染并提交答案，解决等待问题时的卡住。
 - **桌面对话框**：WKWebView 接入 `WKUIDelegate`；confirm/alert/prompt 不再静默失败。
 - **驾驶舱状态**：派生执行中/已卡住/待执行；卡住时隐藏开始，显示任务级原因与恢复/重规划。
-- **R2 审批/回归**：三层审批（工作区规则/前缀记忆/轻量 approval 角色）、workspaceRoot 路径
-  规范化、时间戳/撤回事务、Subscribe 两阶段、delivery out/ 原子替换、ApplyReplan PlanUsage、
-  evidence/compile/desktop 边界；`-race`/vet/check 通过。
+- **R2/F 收口**：三层审批；F-01..F-07 与复核（真实路径 symlink/`..`、`--`、敏感文件、
+  递归与 `git diff/show/log` 内容门禁、旧规则、delivery 回滚、rewind 歧义、evidence 预算）；
+  时间戳/撤回、Subscribe、PlanUsage；复核 SUBMIT；`-race`/vet/check 通过。
 - **安全审查 P0/P1**：webfetch 不再自动放行；远程读 API/files 需 token，files 加 CSP
   sandbox；token 恒定时间 + Host/Origin 同端口；delivery 符号链接、verify 绝对路径、
   opencode 管道死锁、AO 超时、objective 瞬时错误缓存、rewind localOnly/Sync、evidence

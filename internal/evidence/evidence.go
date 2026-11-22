@@ -337,6 +337,8 @@ func renderSummary(entry Entry, available int) string {
 		return ""
 	}
 	if len(prefix)+1 > available {
+		// Do not truncate the provenance line itself; a partial metadata line
+		// is worse than omitting this entry.
 		return ""
 	}
 	text := prefix
@@ -364,8 +366,11 @@ func renderSummary(entry Entry, available int) string {
 	if !strings.HasSuffix(text, "\n") {
 		text += "\n"
 	}
+	// The budget arithmetic above can still overshoot when the provenance
+	// prefix itself does not fit. Truncate instead of returning an empty
+	// summary or exceeding the caller's budget.
 	if len(text) > available {
-		return ""
+		text = truncateString(text, available)
 	}
 	return text
 }

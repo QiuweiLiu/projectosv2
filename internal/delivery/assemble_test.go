@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"projectos/kernel/internal/delivery"
@@ -300,6 +301,85 @@ func TestAssembleFailureKeepsOldOut(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join(dir, "out", "old.txt"))
 	if err != nil || string(raw) != "old" {
 		t.Fatalf("old delivery was replaced on failure: %q %v", raw, err)
+	}
+}
+
+func TestAssemblePublishesReadableOutAndCleansStaging(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.CreateTask(domain.Task{ID: "T1", Validator: "v", ArtifactPath: "a.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := st.Claim("T1", "r1", "fake"); !ok {
+		t.Fatal("claim")
+	}
+	if _, err := st.SettleRun(store.Settlement{RunID: "r1", RunStatus: domain.RunSucceeded, Accepted: true, Result: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := delivery.Assemble(st, dir); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(dir, "out"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o755 {
+		t.Fatalf("out mode = %o, want 755", perm)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".out.") {
+			t.Fatalf("staging directory left behind: %s", entry.Name())
+		}
+	}
+}
+
+func TestAssembleConcurrentCallsPublishCompleteTree(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	for id, artifact := range map[string]string{"T1": "a.txt", "T2": "sub/b.txt"} {
+		if err := st.CreateTask(domain.Task{ID: domain.TaskID(id), Validator: "v", ArtifactPath: artifact}); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok, _ := st.Claim(domain.TaskID(id), "run-"+id, "fake"); !ok {
+			t.Fatal("claim", id)
+		}
+		if _, err := st.SettleRun(store.Settlement{RunID: "run-" + id, RunStatus: domain.RunSucceeded, Accepted: true, Result: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := delivery.Assemble(st, dir); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{"a.txt": "T1", "sub/b.txt": "T2"} {
+		raw, err := os.ReadFile(filepath.Join(dir, "out", path))
+		if err != nil || string(raw) != want {
+			t.Fatalf("%s = %q %v, want %q", path, raw, err, want)
+		}
 	}
 }
 

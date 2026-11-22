@@ -31,6 +31,10 @@ func (m *Manager) judgeRisk(ctx context.Context, conversationID, action string, 
 		return "", "", fmt.Errorf("unknown conversation")
 	}
 	msgs, _ := m.store.Messages(conversationID, 10, "")
+	workspaceRoot := strings.TrimSpace(c.Dir)
+	if workspaceRoot == "" {
+		workspaceRoot = m.cfg.Root
+	}
 	var b strings.Builder
 	b.WriteString(`You classify the risk of one tool request from a local coding assistant.
 Return JSON only: {"risk":"low"|"high","reason":"one short sentence in the user's language"}
@@ -41,7 +45,7 @@ high: destructive or irreversible actions (deleting trees, hard reset, force pus
 
 Request:
 `)
-	b.WriteString("workspace_root: " + clipText(c.Dir, 500) + "\n")
+	b.WriteString("workspace_root: " + clipText(workspaceRoot, 500) + "\n")
 	b.WriteString("action: " + action + "\n")
 	b.WriteString("resources: " + clipText(strings.Join(resources, ", "), 600) + "\n")
 	b.WriteString("message: " + clipText(message, 400) + "\n\nConversation (most recent last):\n")
@@ -64,14 +68,7 @@ Request:
 		return "", "", err
 	}
 	settings := modelcfg.Load(m.cfg.Root)
-	model := strings.TrimSpace(settings.Approval)
-	if model == "" {
-		model = strings.TrimSpace(strings.Split(c.Model, "#")[0])
-	}
-	if model == "" {
-		model = m.cfg.DefaultModel
-	}
-	model = modelcfg.WithVariant(model, settings.VariantFor("approval"))
+	model := approvalModel(settings, c.Model, m.cfg.DefaultModel, m.cfg.Variant)
 	sess, err := srv.CreateSessionWithPolicy(ctx, "Permission risk", model, dir,
 		[]map[string]string{{"action": "*", "resource": "*", "effect": "deny"}})
 	if err != nil {
@@ -116,6 +113,26 @@ Request:
 		}
 	}
 	return risk, clipText(strings.TrimSpace(parsed.Reason), 240), nil
+}
+
+// approvalModel picks the risk judge model. A configured approval role applies
+// its own reasoning variant. The chat fallback is used verbatim: the session
+// model already carries the chat role's variant, and an approval variant must
+// not leak onto a different model.
+func approvalModel(settings modelcfg.Settings, chatModel, defaultModel, chatVariant string) string {
+	if model := strings.TrimSpace(settings.Approval); model != "" {
+		return modelcfg.WithVariant(model, settings.VariantFor("approval"))
+	}
+	if model := strings.TrimSpace(chatModel); model != "" {
+		// Conversations store the base model; the chat variant is applied only
+		// when the chat session is created. Re-apply it for the judge, but do
+		// not append the approval variant to a different role's model.
+		if strings.Contains(model, "#") {
+			return model
+		}
+		return modelcfg.WithVariant(model, chatVariant)
+	}
+	return modelcfg.WithVariant(defaultModel, chatVariant)
 }
 
 // waitRiskText waits for a complete assistant message, not the first streamed

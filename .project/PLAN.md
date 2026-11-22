@@ -1,14 +1,14 @@
 # Plan
 
 ## Now
-P6 可靠性加固：P6.0/P6.1 关键项完成，P6.2 长会话验证完成，P6.3 完成 Task A 单样本。
-下一步扩大真实对照并做有证据支持的优化。
+F-01..F-07 收口完成并通过 `-race`/vet/desktop check 与独立复核，已提交；随后恢复 P6 可靠性加固。
 
 ## Steps
-1. 跑 Task B（数据分析）与 Task C（多阶段研究）真实对照，记录 hidden test、wall/tokens。
-2. 按样本评估 Planner/Reviewer/Acceptance 成本；只做证据支持的默认策略调整。
-3. 补磁盘满、只读挂载、WAL、OpenCode Server 退出重连故障注入。
-4. 维持 Manifest/Evidence/Recovery 的现有正确性门禁，不新增第二套状态机。
+1. 提交 F 收口并重启桌面应用，确认真实导航/审批路径。
+2. 跑 Task B（数据分析）与 Task C（多阶段研究）真实对照，记录 hidden test、wall/tokens。
+3. 按样本评估 Planner/Reviewer/Acceptance 成本；只做证据支持的默认策略调整。
+4. 补磁盘满、只读挂载、WAL、OpenCode Server 退出重连故障注入。
+5. 维持 Manifest/Evidence/Recovery 的现有正确性门禁，不新增第二套状态机。
 
 ## Acceptance
 - 异常不产生虚假完成、重复副作用或越权继续。
